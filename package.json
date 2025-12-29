@@ -8,6 +8,7 @@
     "start": "node src/server.js"
   },
   "dependencies": {
+    "canvas": "^3.2.0",
     "express": "^4.19.2"
   }
 }
