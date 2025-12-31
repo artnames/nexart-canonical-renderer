@@ -58,14 +58,14 @@ Query parameter `?format=json` returns JSON with base64 image data and hashes.
 ```
 X-NexArt-Image-Hash: <sha256 of PNG>
 X-NexArt-Snapshot-Hash: <sha256 of normalized snapshot>
-X-NexArt-SDK-Version: 1.1.0
+X-NexArt-SDK-Version: 1.1.1
 X-NexArt-Protocol-Version: 1.0.0
 X-NexArt-Execution-Time: <ms>
 ```
 
 ## Protocol Compliance
 
-- SDK Version: 1.1.0
+- SDK Version: 1.1.1
 - Protocol Version: 1.0.0
 - Node Version: 1.0.0
 

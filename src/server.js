@@ -5,7 +5,7 @@ import crypto from "crypto";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const SDK_VERSION = "1.1.0";
+const SDK_VERSION = "1.1.1";
 const PROTOCOL_VERSION = "1.0.0";
 const NODE_VERSION = "1.0.0";
 
