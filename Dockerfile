@@ -1,6 +1,5 @@
 FROM node:20-bookworm
 
-# Install system libraries required by node-canvas
 RUN apt-get update && apt-get install -y \
   libcairo2-dev \
   libpango1.0-dev \
@@ -12,13 +11,12 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy package files first (better caching)
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci --only=production
 
-# Copy the rest of the code
 COPY . .
 
-EXPOSE 3000
+ENV PORT=5000
+EXPOSE 5000
 
-CMD ["npm", "run", "dev"]
+CMD ["npm", "start"]
