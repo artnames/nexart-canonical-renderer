@@ -8,6 +8,7 @@
     "start": "node src/server.js"
   },
   "dependencies": {
+    "@nexart/codemode-sdk": "^1.1.0",
     "canvas": "^3.2.0",
     "express": "^4.19.2"
   }
