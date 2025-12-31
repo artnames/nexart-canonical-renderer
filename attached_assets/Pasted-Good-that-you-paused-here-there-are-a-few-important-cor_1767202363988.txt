@@ -1,0 +1,169 @@
+Good that you paused here — there are a few important corrections and clarifications to make before you lock this in. I’ll be direct and precise.
+
+⸻
+
+First: what in that summary is correct
+	•	✅ You are building a server-side canonical node, not a frontend app.
+	•	✅ The goal is authoritative execution + verification, not convenience rendering.
+	•	✅ Determinism (same source + seed + VAR → same hash) is the core requirement.
+	•	✅ This node is what enables “NexArt protocol-compliant minting.”
+	•	✅ The node should be public once stable, so builders can opt into compliance.
+
+All of that is right.
+
+⸻
+
+Now: what is incorrect or misleading in that summary
+
+1. The SDK is NOT “browser-only”
+
+This is the biggest misconception.
+
+@nexart/codemode-sdk is not a UI SDK.
+It is a semantic execution engine.
+	•	It defines:
+	•	Code Mode runtime
+	•	VAR semantics
+	•	Deterministic execution
+	•	Loop vs static behavior
+	•	It does not require document or DOM
+	•	It is designed to be run:
+	•	in NexArt
+	•	in ByX
+	•	in a node
+	•	in any compliant environment
+
+So you should not “adapt” the SDK.
+You should embed it unchanged.
+
+If the node diverges from the SDK, the node is no longer canonical.
+
+⸻
+
+2. The node should NOT invent new APIs lightly
+
+Endpoints like /hash, /verify, etc. are fine, but:
+	•	The core endpoint is just:
+
+POST /render
+
+
+	•	Everything else is optional / additive.
+	•	The protocol authority comes from:
+	•	the SDK
+	•	the snapshot
+	•	the hashes
+—not from fancy API design.
+
+Keep it minimal.
+
+⸻
+
+3. The node is NOT “validating apps”
+
+This distinction matters:
+	•	Apps are not compliant
+	•	mints are compliant
+
+A meditation app looping visuals:
+	•	✔ valid
+	•	✖ not protocol-certified
+
+A ByX mint routed through the node:
+	•	✔ protocol-compliant
+	•	✔ verifiable forever
+
+This needs to be explicit in docs.
+
+⸻
+
+The correct mental model (this is the key)
+
+Think of it like this:
+
+@nexart/codemode-sdk
+
+→ Language + physics
+
+“This is how Code Mode works.”
+
+⸻
+
+Canonical Node
+
+→ Notary + execution witness
+
+“This exact Code Mode snapshot was executed according to the rules.”
+
+⸻
+
+NexArt / ByX / third-party apps
+
+→ Interfaces
+
+“We let humans create and interact.”
+
+⸻
+
+What the node must do (and nothing more)
+
+Here is the final, correct scope:
+	1.	Accept a Code Mode snapshot
+	•	source
+	•	VAR
+	•	seed
+	•	mode (static / loop)
+	•	protocol version
+	2.	Execute it using @nexart/codemode-sdk
+	•	no re-implementation
+	•	no missing functions (strokeWeight, noFill, etc.)
+	•	SDK = authority
+	3.	Produce
+	•	rendered output (PNG / MP4)
+	•	image hash
+	•	snapshot hash
+	•	engine + protocol version
+	4.	Return those artifacts
+	•	nothing UI-specific
+	•	nothing opinionated
+
+That’s it.
+
+⸻
+
+Why the node still matters (answering your earlier doubt)
+
+“If people can use the SDK directly, why do we need the node?”
+
+Because:
+	•	Anyone can claim they used the SDK
+	•	Only the node can prove it
+
+The node is not about control.
+It’s about verifiability.
+
+Same reason Ethereum clients exist even though Solidity compilers are public.
+
+⸻
+
+Final recommendation (next concrete step)
+
+Before writing more code, do this:
+	1.	Lock this rule
+The node imports @nexart/codemode-sdk and never re-implements Code Mode behavior.
+	2.	Delete / freeze
+	•	custom runtimes
+	•	partial p5 mocks
+	•	duplicated logic
+	3.	Make the node boring
+	•	small
+	•	strict
+	•	deterministic
+	•	auditable
+
+If you want, next I can:
+	•	define the exact snapshot schema the node should accept,
+	•	outline a “Protocol-Compliant App” badge spec for nexart.io,
+	•	or help you refactor the current node to fully defer to the SDK.
+
+You’re asking the right questions — this is exactly the right moment to harden the architecture.
