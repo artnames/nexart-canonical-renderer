@@ -1,0 +1,167 @@
+Implement Canonical Loop Rendering for NexArt
+
+You are a senior backend graphics engineer working on the NexArt Canonical Renderer Node.
+
+This node is the authoritative execution environment for NexArt Code Mode and MUST use @nexart/codemode-sdk as the single source of truth.
+
+Preview rendering already works in the browser.
+Your task is to add true canonical LOOP rendering on the server.
+
+⸻
+
+🔒 Context (Non-Negotiable)
+	•	The renderer is a Node.js service (Express)
+	•	Deployed to Railway
+	•	Uses canvas (node-canvas)
+	•	Uses @nexart/codemode-sdk
+	•	Protocol canvas size is LOCKED to 1950×2400
+	•	Determinism is mandatory
+
+Loop mode is currently incorrectly falling back to static PNG.
+This must be fixed.
+
+⸻
+
+🎯 Goal
+
+Implement true canonical loop rendering so that:
+	•	execution.mode === "loop"
+	•	totalFrames > 1
+	•	draw() is executed frame-by-frame
+	•	Frames are captured deterministically
+	•	Output is a real animation (MP4 or WebM)
+	•	The renderer explicitly declares loop output
+
+No fallbacks. No silent downgrade.
+
+⸻
+
+🧠 Required Architecture
+
+1. Execution
+
+Use @nexart/codemode-sdk loop execution semantics:
+	•	Initialize runtime once
+	•	Call setup() exactly once
+	•	Call draw() N times
+	•	Increment frameCount correctly
+	•	Respect seed and VAR[]
+
+Do NOT re-implement p5 logic manually.
+
+⸻
+
+2. Frame Capture
+
+For each frame:
+	•	Render into the same canvas
+	•	Capture raw frame buffer
+	•	Store frames sequentially (PNG buffers in temp dir or memory)
+
+⸻
+
+3. Encoding (Required)
+
+After rendering all frames:
+	•	Encode frames into MP4 or WebM
+	•	Use ffmpeg (already allowed)
+	•	Fixed frame rate (e.g. 30fps)
+	•	Deterministic ordering
+	•	No resizing, cropping, or filtering
+
+⸻
+
+4. Hashing (Critical)
+
+Compute:
+	•	animationHash → SHA-256 of final video bytes
+	•	posterHash → SHA-256 of frame 0 PNG
+	•	snapshotHash → unchanged
+
+These hashes are protocol-level guarantees.
+
+⸻
+
+5. Response Contract (MANDATORY)
+
+For loop mode, the renderer must return JSON, not headers:
+
+{
+  "type": "animation",
+  "mime": "video/mp4",
+  "animationBase64": "...",
+  "animationHash": "...",
+  "posterBase64": "...",
+  "posterHash": "...",
+  "frames": 120,
+  "width": 1950,
+  "height": 2400
+}
+
+Static mode may continue returning PNG.
+
+⸻
+
+🚫 Forbidden Shortcuts
+
+DO NOT:
+	•	Return PNG when loop was requested
+	•	Fake animation by duplicating one frame
+	•	Use browser APIs
+	•	Use preview canvas
+	•	Encode client-side frames
+	•	Skip hashing
+	•	Infer loop from draw() presence
+
+If loop rendering fails → throw error.
+
+⸻
+
+🧪 Validation Requirements
+
+Hard-fail if:
+	•	Output dimensions ≠ 1950×2400
+	•	totalFrames < 2
+	•	Video bytes < reasonable size
+	•	animationHash missing
+	•	isLoopMode ambiguity exists
+
+⸻
+
+📂 Files You Will Modify
+	•	render-loop.js ← primary work
+	•	Possibly server.js
+	•	Possibly validation.js
+
+Do NOT change the protocol surface or snapshot format.
+
+⸻
+
+✅ Definition of Done
+	•	Loop mint no longer falls back to static
+	•	ByX logs show:
+
+isLoopMode: true
+animationHash: <present>
+
+
+	•	IPFS receives a video
+	•	Static and loop paths are clearly separated
+	•	Determinism verified (same input → same hash)
+
+⸻
+
+⚠️ Philosophy (Important)
+
+This node is not a convenience renderer.
+It is a protocol authority.
+
+If something cannot be rendered canonically — it must fail.
+
+⸻
+
+Start by implementing true loop execution and encoding.
+
+Do not simplify.
+Do not guess.
+Do not bypass the SDK.
