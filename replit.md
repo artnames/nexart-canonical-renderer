@@ -2,86 +2,117 @@
 
 ## Overview
 
-A server-side canonical node for NexArt Code Mode execution. This node provides authoritative, protocol-compliant rendering and verification of NexArt Code Mode artworks using deterministic execution with cryptographic hashing.
+A server-side canonical execution node for the NexArt protocol. This node is the authoritative, deterministic execution environment for NexArt Code Mode.
 
-## Purpose
+**This node is NOT:**
+- A frontend app
+- A preview renderer
+- A convenience wrapper
 
-While `@nexart/codemode-sdk` defines the official Code Mode semantics and can be used by any platform to render artworks, client-side or third-party execution alone cannot guarantee protocol compliance or deterministic minting. This canonical node runs the same SDK semantics in a controlled, server-side environment and produces authoritative outputs (images or loops) together with cryptographic hashes.
+**This node IS:**
+- An attestation service
+- The ground truth for minting and verification
+- Protocol-compliant execution only
 
-**Key distinction:**
-- Apps are not compliant - mints are compliant
-- The node is about verifiability, not control
-- Only executions routed through the canonical node can claim full NexArt protocol compliance
+## Authority
 
-## Architecture
+`@nexart/codemode-sdk` is the single source of truth for Code Mode semantics.
 
-- **Runtime**: Node.js with Express server
-- **Canvas**: Uses `node-canvas` for server-side rendering
-- **Randomness**: Deterministic Mulberry32 PRNG seeded by snapshot seed
-- **Noise**: Seeded Perlin noise implementation
-- **Hashing**: SHA-256 for cryptographic verification
+The node implements the SDK's exact algorithms:
+- Mulberry32 seeded PRNG for `random()`
+- Seeded Perlin noise for `noise()`
 
-## Core Endpoint
+## Protocol Invariants
 
-The primary endpoint is:
+- Canvas: **1950×2400** (hard-locked, non-configurable)
+- Determinism: Same input = Same output (SHA-256 verified)
+- VAR: 10 elements, range 0-100
+- Execution: `setup()` only (static mode)
 
-```bash
+## Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Node status with version info |
+| `/render` | POST | Execute snapshot, return canonical result |
+| `/verify` | POST | Verify execution against expected hash |
+
+## Render Endpoint
+
+**Request:**
+```json
 POST /render
 Content-Type: application/json
 
 {
   "code": "function setup() { background(100); ellipse(width/2, height/2, 200); }",
   "seed": "unique-seed-string",
-  "vars": [50, 75],
-  "width": 1950,
-  "height": 2400
+  "vars": [50, 75, 0, 0, 0, 0, 0, 0, 0, 0]
 }
 ```
 
-Returns: PNG image with headers containing hashes and metadata.
-
-Query parameter `?format=json` returns JSON with base64 image data and hashes.
-
-## All Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/render` | POST | Core: Execute snapshot, return PNG + hashes |
-| `/health` | GET | Node health check with version info |
-| `/api/v1/info` | GET | Node capabilities and defaults |
-| `/api/v1/render` | POST | Alias for /render |
-| `/api/v1/hash` | POST | Generate cryptographic hashes |
-| `/api/v1/verify` | POST | Verify execution against expected hash |
-
-## Response Headers (Image Format)
-
-```
-X-NexArt-Image-Hash: <sha256 of PNG>
-X-NexArt-Snapshot-Hash: <sha256 of normalized snapshot>
-X-NexArt-SDK-Version: 1.1.1
-X-NexArt-Protocol-Version: 1.0.0
-X-NexArt-Execution-Time: <ms>
+**Response (canonical result envelope):**
+```json
+{
+  "mime": "image/png",
+  "imageHash": "<sha256>",
+  "imageBase64": "<png-bytes>",
+  "metadata": {
+    "sdk_version": "1.1.1",
+    "protocol_version": "1.0.0",
+    "node_version": "1.0.0",
+    "canvas": { "width": 1950, "height": 2400 },
+    "execution_time_ms": 123,
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
 ```
 
-## Protocol Compliance
+## Verify Endpoint
+
+**Request:**
+```json
+POST /verify
+Content-Type: application/json
+
+{
+  "snapshot": {
+    "code": "...",
+    "seed": "...",
+    "vars": [...]
+  },
+  "expectedHash": "<sha256>"
+}
+```
+
+**Response:**
+```json
+{
+  "verified": true,
+  "computedHash": "<sha256>",
+  "expectedHash": "<sha256>",
+  "protocolCompliant": true
+}
+```
+
+## Version Info
 
 - SDK Version: 1.1.1
 - Protocol Version: 1.0.0
 - Node Version: 1.0.0
 
-## Determinism Guarantee
+## Deployment
 
-Same code + seed + vars = identical output (verified by SHA-256 hash matching)
-
-The node uses:
-- Mulberry32 PRNG for `random()` - seeded from snapshot seed
-- Seeded Perlin noise for `noise()` - consistent across executions
-
-## Running
+The node is configured for Railway deployment via Dockerfile.
 
 ```bash
-npm run dev    # Development
-npm start      # Production
+npm run dev    # Development (Replit)
+npm start      # Production (Railway)
 ```
 
-Server binds to port 5000 (configurable via PORT env variable).
+## Important Constraints
+
+- Do NOT redesign the protocol
+- Do NOT introduce alternative execution paths
+- Do NOT attempt to "fix" user code (fail hard instead)
+- Do NOT diverge from SDK semantics

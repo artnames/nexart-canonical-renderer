@@ -5,29 +5,31 @@ import crypto from "crypto";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const CANVAS_WIDTH = 1950;
+const CANVAS_HEIGHT = 2400;
+const NODE_VERSION = "1.0.0";
 const SDK_VERSION = "1.1.1";
 const PROTOCOL_VERSION = "1.0.0";
-const NODE_VERSION = "1.0.0";
 
-function mulberry32(seed) {
-  let t = seed >>> 0;
-  return function () {
-    t += 0x6d2b79f5;
-    let r = Math.imul(t ^ (t >>> 15), 1 | t);
-    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
-    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+function createSeededRNG(seed = 123456) {
+  let a = seed >>> 0;
+  return () => {
+    a += 0x6d2b79f5;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-function createSeededNoise(seed) {
-  const rand = mulberry32(seed);
+function createSeededNoise(seed = 0) {
   const permutation = [];
+  const rng = createSeededRNG(seed);
   for (let i = 0; i < 256; i++) permutation[i] = i;
   for (let i = 255; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [permutation[i], permutation[j]] = [permutation[j], permutation[i]];
   }
-  const perm = [...permutation, ...permutation];
+  for (let i = 0; i < 256; i++) permutation[256 + i] = permutation[i];
 
   function fade(t) {
     return t * t * t * (t * (t * 6 - 15) + 10);
@@ -52,29 +54,37 @@ function createSeededNoise(seed) {
     const u = fade(x);
     const v = fade(y);
     const w = fade(z);
-    const A = perm[X] + Y;
-    const AA = perm[A] + Z;
-    const AB = perm[A + 1] + Z;
-    const B = perm[X + 1] + Y;
-    const BA = perm[B] + Z;
-    const BB = perm[B + 1] + Z;
+    const A = permutation[X] + Y;
+    const AA = permutation[A] + Z;
+    const AB = permutation[A + 1] + Z;
+    const B = permutation[X + 1] + Y;
+    const BA = permutation[B] + Z;
+    const BB = permutation[B + 1] + Z;
 
     return (
       lerp(
         lerp(
-          lerp(grad(perm[AA], x, y, z), grad(perm[BA], x - 1, y, z), u),
-          lerp(grad(perm[AB], x, y - 1, z), grad(perm[BB], x - 1, y - 1, z), u),
+          lerp(
+            grad(permutation[AA], x, y, z),
+            grad(permutation[BA], x - 1, y, z),
+            u
+          ),
+          lerp(
+            grad(permutation[AB], x, y - 1, z),
+            grad(permutation[BB], x - 1, y - 1, z),
+            u
+          ),
           v
         ),
         lerp(
           lerp(
-            grad(perm[AA + 1], x, y, z - 1),
-            grad(perm[BA + 1], x - 1, y, z - 1),
+            grad(permutation[AA + 1], x, y, z - 1),
+            grad(permutation[BA + 1], x - 1, y, z - 1),
             u
           ),
           lerp(
-            grad(perm[AB + 1], x, y - 1, z - 1),
-            grad(perm[BB + 1], x - 1, y - 1, z - 1),
+            grad(permutation[AB + 1], x, y - 1, z - 1),
+            grad(permutation[BB + 1], x - 1, y - 1, z - 1),
             u
           ),
           v
@@ -87,7 +97,7 @@ function createSeededNoise(seed) {
   };
 }
 
-function createP5Runtime(canvas, width, height, seed, vars) {
+function createP5Runtime(canvas, width, height, seed) {
   const ctx = canvas.getContext("2d");
   let currentFill = "rgba(255, 255, 255, 1)";
   let currentStroke = "rgba(0, 0, 0, 1)";
@@ -103,15 +113,8 @@ function createP5Runtime(canvas, width, height, seed, vars) {
   };
   let shapeStarted = false;
 
-  const rng = mulberry32(seed);
+  let rng = createSeededRNG(seed);
   const noise = createSeededNoise(seed);
-
-  const VAR = new Array(10).fill(0);
-  if (Array.isArray(vars)) {
-    for (let i = 0; i < Math.min(vars.length, 10); i++) {
-      VAR[i] = Math.max(0, Math.min(100, vars[i] ?? 0));
-    }
-  }
 
   const parseColor = (...args) => {
     if (args.length === 0) return "rgba(0, 0, 0, 1)";
@@ -152,7 +155,10 @@ function createP5Runtime(canvas, width, height, seed, vars) {
     width,
     height,
     frameCount: 0,
-    VAR,
+    t: 0,
+    time: 0,
+    tGlobal: 0,
+    VAR: new Array(10).fill(0),
     PI: Math.PI,
     TWO_PI: Math.PI * 2,
     HALF_PI: Math.PI / 2,
@@ -318,11 +324,16 @@ function createP5Runtime(canvas, width, height, seed, vars) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     },
     random: (min, max) => {
+      if (Array.isArray(min)) {
+        return min[Math.floor(rng() * min.length)];
+      }
       if (min === undefined) return rng();
       if (max === undefined) return rng() * min;
       return min + rng() * (max - min);
     },
-    randomSeed: () => {},
+    randomSeed: (s) => {
+      rng = createSeededRNG(s);
+    },
     noise,
     noiseSeed: () => {},
     noiseDetail: () => {},
@@ -372,16 +383,31 @@ function createP5Runtime(canvas, width, height, seed, vars) {
   return p;
 }
 
-function executeCodeMode(code, config) {
-  const { width = 1950, height = 2400, seed = 0, vars = [] } = config;
+function computeHash(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+function executeSnapshot(snapshot) {
+  const { code, seed, vars = [] } = snapshot;
 
   const numericSeed =
     typeof seed === "string"
       ? seed.split("").reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) >>> 0, 0)
-      : seed >>> 0;
+      : (seed ?? 0) >>> 0;
 
-  const canvas = createCanvas(width, height);
-  const p = createP5Runtime(canvas, width, height, numericSeed, vars);
+  const canvas = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
+  const p = createP5Runtime(canvas, CANVAS_WIDTH, CANVAS_HEIGHT, numericSeed);
+
+  const normalizedVars = new Array(10).fill(0);
+  if (Array.isArray(vars)) {
+    for (let i = 0; i < Math.min(vars.length, 10); i++) {
+      const v = vars[i];
+      if (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100) {
+        normalizedVars[i] = v;
+      }
+    }
+  }
+  p.VAR = normalizedVars;
 
   const setupMatch = code.match(
     /function\s+setup\s*\(\s*\)\s*\{([\s\S]*?)\}(?=\s*function|\s*$)/
@@ -398,32 +424,9 @@ function executeCodeMode(code, config) {
     `with(p) { ${setupCode} }`
   );
 
-  wrappedSetup(p, p.VAR, 0, 0, 0, 0);
+  wrappedSetup(p, normalizedVars, 0, 0, 0, 0);
 
   return canvas;
-}
-
-function computeHash(buffer) {
-  return crypto.createHash("sha256").update(buffer).digest("hex");
-}
-
-function computeSnapshotHash(snapshot) {
-  const normalizedVars = new Array(10).fill(0);
-  if (Array.isArray(snapshot.vars)) {
-    for (let i = 0; i < Math.min(snapshot.vars.length, 10); i++) {
-      normalizedVars[i] = snapshot.vars[i] ?? 0;
-    }
-  }
-
-  const normalized = JSON.stringify({
-    code: snapshot.code,
-    seed: String(snapshot.seed ?? "0"),
-    vars: normalizedVars,
-    width: snapshot.width ?? 1950,
-    height: snapshot.height ?? 2400,
-    engine_version: snapshot.engine_version ?? SDK_VERSION,
-  });
-  return crypto.createHash("sha256").update(normalized).digest("hex");
 }
 
 app.use(express.json({ limit: "10mb" }));
@@ -435,21 +438,8 @@ app.get("/health", (req, res) => {
     version: NODE_VERSION,
     sdk_version: SDK_VERSION,
     protocol_version: PROTOCOL_VERSION,
+    canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
     timestamp: new Date().toISOString(),
-  });
-});
-
-app.get("/api/v1/info", (req, res) => {
-  res.json({
-    node: "nexart-canonical",
-    version: NODE_VERSION,
-    sdk_version: SDK_VERSION,
-    protocol_version: PROTOCOL_VERSION,
-    capabilities: ["static", "hash", "verify"],
-    defaults: {
-      width: 1950,
-      height: 2400,
-    },
   });
 });
 
@@ -462,7 +452,7 @@ app.post("/render", (req, res) => {
     if (!snapshot || typeof snapshot !== "object") {
       return res.status(400).json({
         error: "INVALID_SNAPSHOT",
-        message: "Request body must be a valid snapshot object",
+        message: "Request body must be a valid MintSnapshotV1 object",
       });
     }
 
@@ -473,61 +463,27 @@ app.post("/render", (req, res) => {
       });
     }
 
-    const width = snapshot.width ?? 1950;
-    const height = snapshot.height ?? 2400;
-    const seed = snapshot.seed ?? "0";
-    const vars = Array.isArray(snapshot.vars) ? snapshot.vars : [];
-
-    const canvas = executeCodeMode(snapshot.code, {
-      width,
-      height,
-      seed,
-      vars,
-    });
-
+    const canvas = executeSnapshot(snapshot);
     const pngBuffer = canvas.toBuffer("image/png");
     const imageHash = computeHash(pngBuffer);
-    const snapshotHash = computeSnapshotHash(snapshot);
     const executionTime = Date.now() - startTime;
+    const base64Image = pngBuffer.toString("base64");
 
-    const format = req.query.format || "image";
-
-    if (format === "json") {
-      const base64Image = pngBuffer.toString("base64");
-      return res.json({
-        success: true,
-        result: {
-          type: "image",
-          format: "png",
-          width,
-          height,
-          data: `data:image/png;base64,${base64Image}`,
-          size: pngBuffer.length,
-        },
-        hashes: {
-          image: imageHash,
-          snapshot: snapshotHash,
-        },
-        metadata: {
-          sdk_version: SDK_VERSION,
-          protocol_version: PROTOCOL_VERSION,
-          node_version: NODE_VERSION,
-          execution_time_ms: executionTime,
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Content-Length", pngBuffer.length);
-    res.setHeader("X-NexArt-Image-Hash", imageHash);
-    res.setHeader("X-NexArt-Snapshot-Hash", snapshotHash);
-    res.setHeader("X-NexArt-SDK-Version", SDK_VERSION);
-    res.setHeader("X-NexArt-Protocol-Version", PROTOCOL_VERSION);
-    res.setHeader("X-NexArt-Execution-Time", executionTime.toString());
-    res.send(pngBuffer);
+    res.json({
+      mime: "image/png",
+      imageHash,
+      imageBase64: base64Image,
+      metadata: {
+        sdk_version: SDK_VERSION,
+        protocol_version: PROTOCOL_VERSION,
+        node_version: NODE_VERSION,
+        canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+        execution_time_ms: executionTime,
+        timestamp: new Date().toISOString(),
+      },
+    });
   } catch (error) {
-    console.error("Render error:", error);
+    console.error("Execution error:", error);
     res.status(500).json({
       error: "EXECUTION_ERROR",
       message: error.message,
@@ -535,54 +491,11 @@ app.post("/render", (req, res) => {
   }
 });
 
-app.post("/api/v1/render", (req, res) => {
-  req.url = "/render";
-  return app._router.handle(req, res, () => {});
-});
-
-app.post("/api/v1/hash", (req, res) => {
-  try {
-    const { type, data, snapshot } = req.body;
-
-    if (type === "snapshot" && snapshot) {
-      const hash = computeSnapshotHash(snapshot);
-      return res.json({
-        success: true,
-        hash,
-        algorithm: "sha256",
-        type: "snapshot",
-      });
-    }
-
-    if (type === "image" && data) {
-      const buffer = Buffer.from(data, "base64");
-      const hash = computeHash(buffer);
-      return res.json({
-        success: true,
-        hash,
-        algorithm: "sha256",
-        type: "image",
-      });
-    }
-
-    return res.status(400).json({
-      error: "INVALID_HASH_REQUEST",
-      message: "Must provide type (snapshot|image) and corresponding data",
-    });
-  } catch (error) {
-    console.error("Hash error:", error);
-    res.status(500).json({
-      error: "HASH_ERROR",
-      message: error.message,
-    });
-  }
-});
-
-app.post("/api/v1/verify", (req, res) => {
+app.post("/verify", (req, res) => {
   const startTime = Date.now();
 
   try {
-    const { snapshot, expected_hash, hash_type = "image" } = req.body;
+    const { snapshot, expectedHash } = req.body;
 
     if (!snapshot || typeof snapshot !== "object") {
       return res.status(400).json({
@@ -591,45 +504,24 @@ app.post("/api/v1/verify", (req, res) => {
       });
     }
 
-    if (!expected_hash || typeof expected_hash !== "string") {
+    if (!expectedHash || typeof expectedHash !== "string") {
       return res.status(400).json({
         error: "INVALID_REQUEST",
-        message: "Must provide expected_hash string",
+        message: "Must provide expectedHash string",
       });
     }
 
-    const width = snapshot.width ?? 1950;
-    const height = snapshot.height ?? 2400;
-    const seed = snapshot.seed ?? "0";
-    const vars = Array.isArray(snapshot.vars) ? snapshot.vars : [];
-
-    let computedHash;
-    let verified = false;
-
-    if (hash_type === "snapshot") {
-      computedHash = computeSnapshotHash(snapshot);
-      verified = computedHash === expected_hash;
-    } else {
-      const canvas = executeCodeMode(snapshot.code, {
-        width,
-        height,
-        seed,
-        vars,
-      });
-      const pngBuffer = canvas.toBuffer("image/png");
-      computedHash = computeHash(pngBuffer);
-      verified = computedHash === expected_hash;
-    }
-
+    const canvas = executeSnapshot(snapshot);
+    const pngBuffer = canvas.toBuffer("image/png");
+    const computedHash = computeHash(pngBuffer);
+    const verified = computedHash === expectedHash;
     const executionTime = Date.now() - startTime;
 
     res.json({
-      success: true,
       verified,
-      computed_hash: computedHash,
-      expected_hash,
-      hash_type,
-      protocol_compliant: verified,
+      computedHash,
+      expectedHash,
+      protocolCompliant: verified,
       metadata: {
         sdk_version: SDK_VERSION,
         protocol_version: PROTOCOL_VERSION,
@@ -639,7 +531,7 @@ app.post("/api/v1/verify", (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Verify error:", error);
+    console.error("Verification error:", error);
     res.status(500).json({
       error: "VERIFICATION_ERROR",
       message: error.message,
@@ -653,18 +545,15 @@ app.listen(PORT, "0.0.0.0", () => {
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║  NexArt Canonical Node v${NODE_VERSION}                                                  ║
 ║                                                                              ║
-║  Protocol: nexart                                                            ║
-║  Engine: codemode                                                            ║
+║  Authority: @nexart/codemode-sdk                                             ║
 ║  SDK Version: ${SDK_VERSION}                                                         ║
 ║  Protocol Version: ${PROTOCOL_VERSION}                                                    ║
+║  Canvas: ${CANVAS_WIDTH}×${CANVAS_HEIGHT} (hard-locked)                                         ║
 ║                                                                              ║
 ║  Endpoints:                                                                  ║
-║    GET  /health           - Node health check                                ║
-║    GET  /api/v1/info      - Node capabilities                                ║
-║    POST /api/v1/render    - Execute Code Mode and render                     ║
-║    POST /api/v1/hash      - Generate cryptographic hashes                    ║
-║    POST /api/v1/verify    - Verify execution against hash                    ║
-║    POST /render           - Legacy render endpoint                           ║
+║    GET  /health  - Node status                                               ║
+║    POST /render  - Execute snapshot, return { mime, imageHash, imageBase64 } ║
+║    POST /verify  - Verify execution against expected hash                    ║
 ║                                                                              ║
 ║  Running on port ${PORT}                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
