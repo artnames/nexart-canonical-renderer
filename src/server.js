@@ -547,6 +547,14 @@ app.post("/render", async (req, res) => {
     });
   } catch (error) {
     console.error("Execution error:", error);
+    
+    if (error.message && error.message.startsWith("LOOP_MODE_ERROR:")) {
+      return res.status(400).json({
+        error: "LOOP_MODE_ERROR",
+        message: error.message.replace("LOOP_MODE_ERROR: ", ""),
+      });
+    }
+    
     res.status(500).json({
       error: "EXECUTION_ERROR",
       message: error.message,
