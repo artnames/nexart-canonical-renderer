@@ -18,9 +18,23 @@ A server-side canonical execution node for the NexArt protocol. This node is the
 
 `@nexart/codemode-sdk` is the single source of truth for Code Mode semantics.
 
-The node implements the SDK's exact algorithms:
+The node uses the SDK directly via `createP5Runtime()`:
 - Mulberry32 seeded PRNG for `random()`
 - Seeded Perlin noise for `noise()`
+- Color parsing, HSB/RGB conversion
+- Core drawing primitives
+
+## Architecture
+
+```
+SDK (createP5Runtime)     →  Core deterministic primitives
+       ↓
+p5-extensions.js          →  Missing p5.js methods (strokeCap, rectMode, etc.)
+       ↓
+server.js / render-loop.js  →  Request handling, video encoding
+```
+
+The SDK is imported via `createRequire()` workaround due to ESM compatibility issues with the package's restrictive exports.
 
 ## Protocol Invariants
 
