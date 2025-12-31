@@ -1,0 +1,82 @@
+Here’s exactly what to tell Replit — short, precise, and framed so it doesn’t trigger another redesign.
+
+You can copy-paste this.
+
+⸻
+
+Message to Replit (canonical renderer node)
+
+Context
+
+We are building a server-side canonical execution node for the NexArt protocol.
+
+This node is not a frontend app and not a preview renderer.
+
+Its sole purpose is to act as the authoritative, deterministic execution environment for NexArt Code Mode, using the SDK below as the single source of truth:
+
+@nexart/codemode-sdk — Canonical Code Mode Authority
+
+Whatever this SDK does is the NexArt protocol.
+
+⸻
+
+What this node must do (no more, no less)
+	1.	Accept a protocol-compliant MintSnapshotV1
+	•	Must include code (string), seed, vars[10], execution mode
+	2.	Execute the artwork via @nexart/codemode-sdk
+	•	No custom drawing logic
+	•	No reimplementation of p5 helpers
+	3.	Enforce protocol invariants:
+	•	Canvas hard-locked to 1950×2400
+	•	Deterministic execution (same input → same output)
+	4.	Produce authoritative output:
+	•	PNG bytes
+	•	SHA-256 hash of the PNG
+	5.	Return a canonical result envelope, e.g.:
+
+{
+  "mime": "image/png",
+  "imageHash": "<sha256>",
+  "imageBase64": "<png-bytes>"
+}
+
+This response is the ground truth for minting and verification.
+
+⸻
+
+Important constraints
+	•	Do NOT redesign the protocol
+	•	Do NOT introduce alternative execution paths
+	•	Do NOT attempt to “fix” user code (fail hard instead)
+	•	Do NOT diverge from @nexart/codemode-sdk semantics
+
+This node is an attestation service, not a convenience renderer.
+
+⸻
+
+Goal
+
+Once the node is correct in Replit (dev), it will be deployed unchanged to Railway and made public as the official NexArt Canonical Renderer.
+
+⸻
+
+Why this wording matters
+
+This tells Replit, very explicitly:
+	•	❌ no product thinking
+	•	❌ no abstractions
+	•	❌ no “better architecture”
+	•	✅ strict protocol executor
+	•	✅ SDK = law
+	•	✅ determinism > flexibility
+
+It aligns them with how you’re thinking about NexArt as a protocol, not an app.
+
+⸻
+
+If you want, next I can:
+	•	Rewrite this as a README.md for the node repo
+	•	Help you define a versioned API contract (v1 locked)
+	•	Or prepare the public announcement text for when the node goes live
+
+Just say the word.
