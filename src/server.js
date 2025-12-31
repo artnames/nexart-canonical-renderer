@@ -113,6 +113,8 @@ function createP5Runtime(canvas, width, height, seed) {
     maxA: 255,
   };
   let shapeStarted = false;
+  let rectModeValue = "corner";
+  let ellipseModeValue = "center";
 
   let rng = createSeededRNG(seed);
   const noise = createSeededNoise(seed);
@@ -204,6 +206,20 @@ function createP5Runtime(canvas, width, height, seed) {
       currentStrokeWeight = weight;
       ctx.lineWidth = weight;
     },
+    strokeCap: (cap) => {
+      const capMap = { round: "round", square: "butt", project: "square" };
+      ctx.lineCap = capMap[cap] || cap || "round";
+    },
+    strokeJoin: (join) => {
+      const joinMap = { round: "round", miter: "miter", bevel: "bevel" };
+      ctx.lineJoin = joinMap[join] || join || "miter";
+    },
+    rectMode: (mode) => {
+      rectModeValue = mode || "corner";
+    },
+    ellipseMode: (mode) => {
+      ellipseModeValue = mode || "center";
+    },
     colorMode: (mode, max1, max2, max3, maxA) => {
       colorModeSettings = {
         mode: mode.toUpperCase(),
@@ -216,10 +232,23 @@ function createP5Runtime(canvas, width, height, seed) {
     color: (...args) => parseColor(...args),
     lerpColor: (c1, c2, amt) => c1,
     ellipse: (x, y, w, h) => {
-      const rw = w / 2;
-      const rh = (h ?? w) / 2;
+      let cx = x, cy = y;
+      let rw = w / 2;
+      let rh = (h ?? w) / 2;
+      if (ellipseModeValue === "corner") {
+        cx = x + rw;
+        cy = y + rh;
+      } else if (ellipseModeValue === "corners") {
+        rw = (w - x) / 2;
+        rh = ((h ?? w) - y) / 2;
+        cx = x + rw;
+        cy = y + rh;
+      } else if (ellipseModeValue === "radius") {
+        rw = w;
+        rh = h ?? w;
+      }
       ctx.beginPath();
-      ctx.ellipse(x, y, rw, rh, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, cy, Math.abs(rw), Math.abs(rh), 0, 0, Math.PI * 2);
       if (fillEnabled) ctx.fill();
       if (strokeEnabled) ctx.stroke();
     },
