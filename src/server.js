@@ -1,8 +1,7 @@
 import express from "express";
-import { renderStatic } from "./render-static";
-import { renderLoop } from "./render-loop";
-import { validateRequest } from "./validation";
-
+import { renderStatic } from "./render-static.js";
+import { renderLoop } from "./render-loop.js";
+import { validateRequest } from "./validation.js";
 const app = express();
 app.use(express.json());
 
