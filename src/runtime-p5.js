@@ -8,6 +8,7 @@ export async function runSketch({
   vars,
   seed
 }) {
+  // Deterministic RNG
   let s = seed >>> 0;
   function random() {
     s += 0x6D2B79F5;
@@ -17,11 +18,18 @@ export async function runSketch({
   }
 
   const sandbox = {
+    // Canvas
     width,
     height,
     ctx,
+
+    // VAR protocol
     VAR: vars,
 
+    // Frame state
+    frameCount: 0,
+
+    // Math
     sin: Math.sin,
     cos: Math.cos,
     sqrt: Math.sqrt,
@@ -34,31 +42,59 @@ export async function runSketch({
 
     map: (v, a1, a2, b1, b2) =>
       b1 + (b2 - b1) * ((v - a1) / (a2 - a1)),
+
     constrain: (v, a, b) => Math.max(a, Math.min(b, v)),
 
+    // Drawing API
     background(r, g, b) {
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fillRect(0, 0, width, height);
     },
+
     fill(r, g, b) {
       ctx.fillStyle = `rgb(${r},${g},${b})`;
     },
-    noStroke() {},
+
+    noFill() {
+      ctx.fillStyle = "transparent";
+    },
+
+    stroke(r, g, b) {
+      ctx.strokeStyle = `rgb(${r},${g},${b})`;
+    },
+
+    noStroke() {
+      ctx.strokeStyle = "transparent";
+    },
+
     rect(x, y, w, h) {
       ctx.fillRect(x, y, w, h);
     },
 
+    // RNG
     random,
+
+    // Control
     noLoop() {}
   };
 
   const wrapped = `
-    (function(){
-      ${source}
-      if (typeof setup === "function") setup();
-    })();
+    let __frame = 0;
+    ${source}
+
+    if (typeof setup === "function") setup();
+
+    function __drawFrame() {
+      frameCount = __frame;
+      if (typeof draw === "function") draw();
+      __frame++;
+    }
   `;
 
   vm.createContext(sandbox);
   vm.runInContext(wrapped, sandbox, { timeout: 2000 });
+
+  return () => {
+    sandbox.__drawFrame();
+  };
 }
