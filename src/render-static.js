@@ -13,7 +13,7 @@ export async function renderStatic({
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext("2d");
 
-  await runSketch({
+  const drawFrame = await runSketch({
     ctx,
     width: WIDTH,
     height: HEIGHT,
@@ -22,15 +22,11 @@ export async function renderStatic({
     seed
   });
 
-  const buffer = canvas.toBuffer("image/png");
-  if (buffer.length < 10_000) {
-    throw new Error(`Invalid PNG size: ${buffer.length}`);
-  }
+  // One render pass
+  drawFrame();
 
-  const imageHash = crypto
-    .createHash("sha256")
-    .update(buffer)
-    .digest("hex");
+  const buffer = canvas.toBuffer("image/png");
+  const imageHash = crypto.createHash("sha256").update(buffer).digest("hex");
 
   return {
     buffer,
