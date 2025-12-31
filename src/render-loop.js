@@ -1,13 +1,10 @@
 import { createCanvas } from "canvas";
-import ffmpeg from "fluent-ffmpeg";
-import ffmpegPath from "ffmpeg-static";
 import fs from "fs";
-import os from "os";
 import path from "path";
+import os from "os";
 import crypto from "crypto";
+import ffmpeg from "fluent-ffmpeg";
 import { runSketch } from "./runtime-p5.js";
-
-ffmpeg.setFfmpegPath(ffmpegPath);
 
 const WIDTH = 1950;
 const HEIGHT = 2400;
@@ -17,50 +14,51 @@ export async function renderLoop({
   vars,
   seed,
   totalFrames,
-  fps
+  fps = 30
 }) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nexart-"));
-  const frames = [];
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nexart-"));
 
+  const canvas = createCanvas(WIDTH, HEIGHT);
+  const ctx = canvas.getContext("2d");
+
+  const drawFrame = await runSketch({
+    ctx,
+    width: WIDTH,
+    height: HEIGHT,
+    source,
+    vars,
+    seed
+  });
+
+  // Render frames
   for (let i = 0; i < totalFrames; i++) {
-    const canvas = createCanvas(WIDTH, HEIGHT);
-    const ctx = canvas.getContext("2d");
-
-    await runSketch({
-      ctx,
-      width: WIDTH,
-      height: HEIGHT,
-      source,
-      vars,
-      seed: seed + i
-    });
-
-    const framePath = path.join(tmp, `f_${i}.png`);
+    drawFrame();
+    const framePath = path.join(tmpDir, `f_${i}.png`);
     fs.writeFileSync(framePath, canvas.toBuffer("image/png"));
-    frames.push(framePath);
   }
 
-  const out = path.join(tmp, "out.mp4");
+  const outPath = path.join(tmpDir, "out.mp4");
 
   await new Promise((resolve, reject) => {
     ffmpeg()
-      .input(path.join(tmp, "f_%d.png"))
+      .input(path.join(tmpDir, "f_%d.png"))
       .inputFPS(fps)
       .outputOptions([
         "-pix_fmt yuv420p",
         "-movflags +faststart"
       ])
-      .save(out)
+      .output(outPath)
       .on("end", resolve)
-      .on("error", reject);
+      .on("error", reject)
+      .run();
   });
 
-  const buffer = fs.readFileSync(out);
-  const hash = crypto.createHash("sha256").update(buffer).digest("hex");
+  const buffer = fs.readFileSync(outPath);
+  const imageHash = crypto.createHash("sha256").update(buffer).digest("hex");
 
   return {
     buffer,
     mime: "video/mp4",
-    imageHash: hash
+    imageHash
   };
 }
