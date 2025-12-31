@@ -1,6 +1,7 @@
 import express from "express";
 import { createCanvas } from "canvas";
 import crypto from "crypto";
+import { renderLoop } from "./render-loop.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -443,7 +444,15 @@ app.get("/health", (req, res) => {
   });
 });
 
-app.post("/render", (req, res) => {
+function detectLoopMode(code, execution) {
+  if (execution && execution.mode === "loop") {
+    return true;
+  }
+  const hasDrawFunction = /function\s+draw\s*\(\s*\)\s*\{/.test(code);
+  return hasDrawFunction && execution && execution.totalFrames > 1;
+}
+
+app.post("/render", async (req, res) => {
   const startTime = Date.now();
 
   try {
@@ -463,6 +472,58 @@ app.post("/render", (req, res) => {
       });
     }
 
+    const { code, seed, vars, execution } = snapshot;
+    const isLoopMode = detectLoopMode(code, execution);
+
+    if (isLoopMode) {
+      const totalFrames = execution?.totalFrames || 120;
+      const fps = execution?.fps || 30;
+
+      if (totalFrames < 2) {
+        return res.status(400).json({
+          error: "LOOP_MODE_ERROR",
+          message: "Loop mode requires totalFrames >= 2",
+        });
+      }
+
+      console.log(`[LOOP MODE] Rendering ${totalFrames} frames at ${fps}fps`);
+
+      const result = await renderLoop({
+        code,
+        seed,
+        vars,
+        totalFrames,
+        fps
+      });
+
+      const executionTime = Date.now() - startTime;
+
+      console.log(`[LOOP MODE] Complete - isLoopMode: true, animationHash: ${result.animationHash}`);
+
+      res.json({
+        type: "animation",
+        mime: result.mime,
+        animationBase64: result.animationBase64,
+        animationHash: result.animationHash,
+        posterBase64: result.posterBase64,
+        posterHash: result.posterHash,
+        frames: result.frames,
+        width: result.width,
+        height: result.height,
+        fps: result.fps,
+        metadata: {
+          sdk_version: SDK_VERSION,
+          protocol_version: PROTOCOL_VERSION,
+          node_version: NODE_VERSION,
+          canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+          execution_time_ms: executionTime,
+          timestamp: new Date().toISOString(),
+          isLoopMode: true
+        },
+      });
+      return;
+    }
+
     const canvas = executeSnapshot(snapshot);
     const pngBuffer = canvas.toBuffer("image/png");
     const imageHash = computeHash(pngBuffer);
@@ -470,6 +531,7 @@ app.post("/render", (req, res) => {
     const base64Image = pngBuffer.toString("base64");
 
     res.json({
+      type: "static",
       mime: "image/png",
       imageHash,
       imageBase64: base64Image,
@@ -480,6 +542,7 @@ app.post("/render", (req, res) => {
         canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
         execution_time_ms: executionTime,
         timestamp: new Date().toISOString(),
+        isLoopMode: false
       },
     });
   } catch (error) {
@@ -550,9 +613,13 @@ app.listen(PORT, "0.0.0.0", () => {
 ║  Protocol Version: ${PROTOCOL_VERSION}                                                    ║
 ║  Canvas: ${CANVAS_WIDTH}×${CANVAS_HEIGHT} (hard-locked)                                         ║
 ║                                                                              ║
+║  Modes:                                                                      ║
+║    Static: setup() only → PNG                                                ║
+║    Loop:   setup() + draw() × N → MP4 video                                  ║
+║                                                                              ║
 ║  Endpoints:                                                                  ║
 ║    GET  /health  - Node status                                               ║
-║    POST /render  - Execute snapshot, return { mime, imageHash, imageBase64 } ║
+║    POST /render  - Execute snapshot (static or loop)                         ║
 ║    POST /verify  - Verify execution against expected hash                    ║
 ║                                                                              ║
 ║  Running on port ${PORT}                                                          ║
