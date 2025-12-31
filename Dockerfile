@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
   libgif-dev \
   librsvg2-dev \
   libuuid1 \
+  ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
