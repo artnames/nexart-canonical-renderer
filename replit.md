@@ -8,6 +8,11 @@ A server-side canonical node for NexArt Code Mode execution. This node provides 
 
 While `@nexart/codemode-sdk` defines the official Code Mode semantics and can be used by any platform to render artworks, client-side or third-party execution alone cannot guarantee protocol compliance or deterministic minting. This canonical node runs the same SDK semantics in a controlled, server-side environment and produces authoritative outputs (images or loops) together with cryptographic hashes.
 
+**Key distinction:**
+- Apps are not compliant - mints are compliant
+- The node is about verifiability, not control
+- Only executions routed through the canonical node can claim full NexArt protocol compliance
+
 ## Architecture
 
 - **Runtime**: Node.js with Express server
@@ -16,39 +21,47 @@ While `@nexart/codemode-sdk` defines the official Code Mode semantics and can be
 - **Noise**: Seeded Perlin noise implementation
 - **Hashing**: SHA-256 for cryptographic verification
 
-## API Endpoints
+## Core Endpoint
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Node health check with version info |
-| `/api/v1/info` | GET | Node capabilities and defaults |
-| `/api/v1/render` | POST | Execute Code Mode and render artwork |
-| `/api/v1/hash` | POST | Generate cryptographic hashes |
-| `/api/v1/verify` | POST | Verify execution against expected hash |
-| `/render` | POST | Legacy render endpoint (backwards compatible) |
-
-## Render Endpoint
+The primary endpoint is:
 
 ```bash
-POST /api/v1/render
+POST /render
 Content-Type: application/json
 
 {
   "code": "function setup() { background(100); ellipse(width/2, height/2, 200); }",
   "seed": "unique-seed-string",
-  "vars": [50, 75, 0, 0, 0, 0, 0, 0, 0, 0],
+  "vars": [50, 75],
   "width": 1950,
   "height": 2400
 }
 ```
 
+Returns: PNG image with headers containing hashes and metadata.
+
 Query parameter `?format=json` returns JSON with base64 image data and hashes.
 
-## Verification
+## All Endpoints
 
-The node generates two types of hashes:
-- **Image Hash**: SHA-256 of the rendered PNG buffer
-- **Snapshot Hash**: SHA-256 of normalized snapshot metadata (code, seed, vars, dimensions, engine_version)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/render` | POST | Core: Execute snapshot, return PNG + hashes |
+| `/health` | GET | Node health check with version info |
+| `/api/v1/info` | GET | Node capabilities and defaults |
+| `/api/v1/render` | POST | Alias for /render |
+| `/api/v1/hash` | POST | Generate cryptographic hashes |
+| `/api/v1/verify` | POST | Verify execution against expected hash |
+
+## Response Headers (Image Format)
+
+```
+X-NexArt-Image-Hash: <sha256 of PNG>
+X-NexArt-Snapshot-Hash: <sha256 of normalized snapshot>
+X-NexArt-SDK-Version: 1.1.0
+X-NexArt-Protocol-Version: 1.0.0
+X-NexArt-Execution-Time: <ms>
+```
 
 ## Protocol Compliance
 
@@ -56,15 +69,13 @@ The node generates two types of hashes:
 - Protocol Version: 1.0.0
 - Node Version: 1.0.0
 
-## Security
-
-- Code validation with forbidden pattern detection
-- Blocked: eval, Function(), process, global, require, import, constructor, prototype access
-- Sandboxed execution with limited global scope
-
 ## Determinism Guarantee
 
 Same code + seed + vars = identical output (verified by SHA-256 hash matching)
+
+The node uses:
+- Mulberry32 PRNG for `random()` - seeded from snapshot seed
+- Seeded Perlin noise for `noise()` - consistent across executions
 
 ## Running
 
