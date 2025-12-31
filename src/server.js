@@ -156,6 +156,8 @@ app.post("/render", async (req, res) => {
       return res.json({
         type: "animation",
         mime: "video/mp4",
+        imageHash: result.posterHash,
+        imageBase64: result.posterBase64,
         animationBase64: result.animationBase64,
         animationHash: result.animationHash,
         posterBase64: result.posterBase64,
