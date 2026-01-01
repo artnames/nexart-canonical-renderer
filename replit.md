@@ -118,6 +118,8 @@ Content-Type: application/json
 {
   "type": "animation",
   "mime": "video/mp4",
+  "imageHash": "<sha256>",
+  "imageBase64": "<png-bytes>",
   "animationBase64": "<mp4-bytes>",
   "animationHash": "<sha256>",
   "posterBase64": "<png-bytes>",
