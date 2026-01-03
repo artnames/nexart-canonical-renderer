@@ -85,7 +85,7 @@ Content-Type: application/json
   "imageHash": "<sha256>",
   "imageBase64": "<png-bytes>",
   "metadata": {
-    "sdk_version": "1.1.1",
+    "sdk_version": "1.5.0",
     "protocol_version": "1.0.0",
     "node_version": "1.0.0",
     "canvas": { "width": 1950, "height": 2400 },
@@ -129,7 +129,7 @@ Content-Type: application/json
   "height": 2400,
   "fps": 30,
   "metadata": {
-    "sdk_version": "1.1.1",
+    "sdk_version": "1.5.0",
     "protocol_version": "1.0.0",
     "node_version": "1.0.0",
     "canvas": { "width": 1950, "height": 2400 },
@@ -169,7 +169,7 @@ Content-Type: application/json
 
 ## Version Info
 
-- SDK Version: 1.1.1
+- SDK Version: 1.5.0
 - Protocol Version: 1.0.0
 - Node Version: 1.0.0
 
