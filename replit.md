@@ -170,7 +170,7 @@ Content-Type: application/json
 ## Version Info
 
 - SDK Version: 1.5.0
-- Protocol Version: 1.0.0
+- Protocol Version: 1.2.0
 - Node Version: 1.0.0
 
 ## Deployment
