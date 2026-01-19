@@ -3,6 +3,10 @@ export function extendP5Runtime(p, canvas) {
   let rectModeValue = "corner";
   let ellipseModeValue = "center";
   
+  p.createCanvas = () => {
+    throw new Error("PROTOCOL_VIOLATION: createCanvas() is not allowed. Canvas is hard-locked to 1950x2400 by NexArt Protocol.");
+  };
+  
   p.strokeCap = (cap) => {
     const capMap = { round: "round", square: "butt", project: "square" };
     ctx.lineCap = capMap[cap] || cap || "round";

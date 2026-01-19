@@ -216,6 +216,13 @@ app.post("/render", async (req, res) => {
   } catch (error) {
     console.error("Execution error:", error);
     
+    if (error.message && error.message.startsWith("PROTOCOL_VIOLATION:")) {
+      return res.status(400).json({
+        error: "PROTOCOL_VIOLATION",
+        message: error.message.replace("PROTOCOL_VIOLATION: ", ""),
+      });
+    }
+    
     if (error.message && error.message.startsWith("LOOP_MODE_ERROR:")) {
       return res.status(400).json({
         error: "LOOP_MODE_ERROR",
@@ -389,6 +396,14 @@ app.post("/verify", async (req, res) => {
     });
   } catch (error) {
     console.error("Verification error:", error);
+    
+    if (error.message && error.message.startsWith("PROTOCOL_VIOLATION:")) {
+      return res.status(400).json({
+        error: "PROTOCOL_VIOLATION",
+        message: error.message.replace("PROTOCOL_VIOLATION: ", ""),
+        verified: false,
+      });
+    }
     
     if (error.message && error.message.startsWith("LOOP_MODE_ERROR:")) {
       return res.status(400).json({
