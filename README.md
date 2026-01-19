@@ -82,6 +82,19 @@ The `/verify` endpoint supports both static and loop mode verification:
 
 For loop mode, `verified: true` requires all provided expected hashes to match their computed counterparts.
 
+### CORS
+
+The server allows cross-origin requests from any origin (`*`) to support browser clients on hosted platforms (e.g., `*.lovable.app`).
+
+**Verify CORS headers:**
+```bash
+curl -I -X OPTIONS https://your-renderer.railway.app/health \
+  -H "Origin: https://example.lovable.app" \
+  -H "Access-Control-Request-Method: POST"
+```
+
+In the browser, check that response headers include `access-control-allow-origin: *`.
+
 ## Who Should Use This
 
 - Platform operators running NexArt-compatible minting infrastructure

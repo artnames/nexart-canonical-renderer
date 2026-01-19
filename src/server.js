@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import { createCanvas } from "canvas";
 import crypto from "crypto";
 import { createRequire } from "module";
@@ -19,6 +20,19 @@ const {
 } = require(sdkPath);
 
 const app = express();
+
+// CORS configuration - allow all origins for demo
+// For production, replace with specific origins:
+// const allowedOrigins = ['https://your-app.lovable.app', 'https://another.domain.com'];
+// app.use(cors({ origin: allowedOrigins, methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type'] }));
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Handle preflight requests for all routes
+app.options('*', cors());
 const PORT = process.env.PORT || 5000;
 
 const CANVAS_WIDTH = 1950;
