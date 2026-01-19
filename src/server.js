@@ -267,8 +267,10 @@ app.post("/verify", async (req, res) => {
       const computedPosterHash = result.posterHash;
 
       // Determine verification result
-      let animationVerified = true;
-      let posterVerified = true;
+      // Only set verified flags if the corresponding expected hash is provided
+      let animationVerified = null;
+      let posterVerified = null;
+      let hashMatchType = null;
 
       if (expectedAnimationHash) {
         animationVerified = computedAnimationHash === expectedAnimationHash;
@@ -277,22 +279,32 @@ app.post("/verify", async (req, res) => {
         posterVerified = computedPosterHash === expectedPosterHash;
       }
 
-      // If only expectedHash provided, check against both (poster takes precedence for backward compat)
-      let hashMatchType = null;
+      // If only expectedHash provided (backward compat), check against both and report which matched
       if (expectedHash && !expectedAnimationHash && !expectedPosterHash) {
-        if (computedPosterHash === expectedHash) {
+        const posterMatches = computedPosterHash === expectedHash;
+        const animationMatches = computedAnimationHash === expectedHash;
+        
+        if (posterMatches) {
           posterVerified = true;
           hashMatchType = "poster";
-        } else if (computedAnimationHash === expectedHash) {
+        } else {
+          posterVerified = false;
+        }
+        
+        if (animationMatches) {
           animationVerified = true;
-          hashMatchType = "animation";
+          hashMatchType = animationMatches && !posterMatches ? "animation" : hashMatchType;
         } else {
           animationVerified = false;
-          posterVerified = false;
         }
       }
 
-      const verified = animationVerified && posterVerified;
+      // Calculate verified: all provided checks must pass
+      // If a hash wasn't requested, it doesn't affect verification
+      const animOk = animationVerified === null || animationVerified === true;
+      const posterOk = posterVerified === null || posterVerified === true;
+      const atLeastOneChecked = animationVerified !== null || posterVerified !== null;
+      const verified = atLeastOneChecked && animOk && posterOk;
       const executionTime = Date.now() - startTime;
 
       const response = {
@@ -312,17 +324,19 @@ app.post("/verify", async (req, res) => {
         },
       };
 
-      // Include expected hashes in response
+      // Include expected hashes and verification results in response
       if (expectedAnimationHash) {
         response.expectedAnimationHash = expectedAnimationHash;
-        response.animationVerified = computedAnimationHash === expectedAnimationHash;
+        response.animationVerified = animationVerified;
       }
       if (expectedPosterHash) {
         response.expectedPosterHash = expectedPosterHash;
-        response.posterVerified = computedPosterHash === expectedPosterHash;
+        response.posterVerified = posterVerified;
       }
-      if (expectedHash) {
+      if (expectedHash && !expectedAnimationHash && !expectedPosterHash) {
         response.expectedHash = expectedHash;
+        response.animationVerified = animationVerified;
+        response.posterVerified = posterVerified;
         if (hashMatchType) {
           response.hashMatchType = hashMatchType;
         }
