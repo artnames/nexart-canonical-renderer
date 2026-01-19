@@ -1,0 +1,63 @@
+d to /render and /verify
+	•	A demo flow: run Certified → show PNG + hash → verify → VERIFIED → export bundle
+
+⸻
+
+2) Replit Prompt — Upgrade Canonical Node to Verify Loop (MP4) Properly
+
+We need the NexArt canonical renderer node to verify loop mode outputs, not just static PNG.
+
+Current behavior:
+	•	/render supports loop mode via renderLoop() and returns:
+	•	animationBase64, animationHash
+	•	posterBase64, posterHash
+	•	/verify currently always executes executeSnapshot(snapshot) and hashes a PNG, so it cannot verify loop mode MP4 outputs.
+
+Task
+
+Implement loop-aware verification so that /verify can validate:
+	•	static PNG hash (existing)
+	•	loop MP4 hash and poster hash (new)
+
+Requirements
+	1.	Update /verify request schema to support loop verification:
+
+	•	Accept { snapshot, expectedHash } (backward compatible)
+	•	Also allow { snapshot, expectedAnimationHash, expectedPosterHash }
+	•	Or allow expectedHash to be either posterHash or animationHash, but be explicit and return which one was checked.
+
+	2.	Detect loop mode the same way /render does:
+
+	•	Use detectLoopMode(code, execution)
+	•	If loop mode:
+	•	call renderLoop({ code, seed, vars, totalFrames, fps, width, height })
+	•	compute/compare:
+	•	computedAnimationHash vs expectedAnimationHash
+	•	computedPosterHash vs expectedPosterHash
+	•	return verified: true only if required hashes match
+
+	3.	Response must include:
+
+	•	verified
+	•	mode: "static" | "loop"
+	•	computedHash + expectedHash for static
+	•	computedAnimationHash, expectedAnimationHash
+	•	computedPosterHash, expectedPosterHash
+	•	metadata (sdk_version, protocol_version, node_version, execution_time_ms)
+
+	4.	Maintain protocol invariant:
+
+	•	SHA-256 must be computed over raw output bytes (MP4 bytes for animationHash, PNG bytes for posterHash)
+
+	5.	Add a minimal test script or curl examples:
+
+	•	loop snapshot with execution: { mode: "loop", totalFrames: 60, fps: 30 }
+	•	demonstrate:
+	•	call /render → obtain hashes
+	•	call /verify with those hashes → verified true
+	•	change one hash → verified false
+
+Output
+	•	Show the exact changes to server.js
+	•	Any changes needed in render-loop.js to expose raw bytes consistently
+	•	Provide working curl commands for loop + static verification

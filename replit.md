@@ -142,14 +142,14 @@ Content-Type: application/json
 
 ## Verify Endpoint
 
-**Request:**
+### Static Mode Verification
 ```json
 POST /verify
 Content-Type: application/json
 
 {
   "snapshot": {
-    "code": "...",
+    "code": "function setup() { background(100); }",
     "seed": "...",
     "vars": [...]
   },
@@ -161,11 +161,48 @@ Content-Type: application/json
 ```json
 {
   "verified": true,
+  "mode": "static",
   "computedHash": "<sha256>",
   "expectedHash": "<sha256>",
-  "protocolCompliant": true
+  "protocolCompliant": true,
+  "metadata": { ... }
 }
 ```
+
+### Loop Mode Verification
+```json
+POST /verify
+Content-Type: application/json
+
+{
+  "snapshot": {
+    "code": "function setup() { background(50); } function draw() { ellipse(random(width), random(height), 100); }",
+    "seed": "...",
+    "vars": [...],
+    "execution": { "mode": "loop", "totalFrames": 60, "fps": 30 }
+  },
+  "expectedAnimationHash": "<sha256-of-mp4>",
+  "expectedPosterHash": "<sha256-of-first-frame-png>"
+}
+```
+
+**Response:**
+```json
+{
+  "verified": true,
+  "mode": "loop",
+  "computedAnimationHash": "<sha256>",
+  "computedPosterHash": "<sha256>",
+  "expectedAnimationHash": "<sha256>",
+  "expectedPosterHash": "<sha256>",
+  "animationVerified": true,
+  "posterVerified": true,
+  "protocolCompliant": true,
+  "metadata": { "frames": 60, "fps": 30, ... }
+}
+```
+
+**Backward Compatibility:** If only `expectedHash` is provided for loop mode, it checks against both posterHash and animationHash, returning `hashMatchType` to indicate which matched.
 
 ## Version Info
 

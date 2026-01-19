@@ -71,7 +71,14 @@ Only canonical outputs are recorded on-chain.
 |----------|--------|-------------|
 | `/health` | GET | Node status |
 | `/render` | POST | Execute snapshot, return output + hash |
-| `/verify` | POST | Re-execute, compare against expected hash |
+| `/verify` | POST | Re-execute, compare against expected hash (static or loop) |
+
+### Verification
+
+The `/verify` endpoint supports both static and loop mode verification:
+
+- **Static**: Provide `expectedHash` (SHA-256 of PNG bytes)
+- **Loop**: Provide `expectedAnimationHash` (SHA-256 of MP4 bytes) and/or `expectedPosterHash` (SHA-256 of first frame PNG)
 
 ## Who Should Use This
 

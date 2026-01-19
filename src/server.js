@@ -216,11 +216,11 @@ app.post("/render", async (req, res) => {
   }
 });
 
-app.post("/verify", (req, res) => {
+app.post("/verify", async (req, res) => {
   const startTime = Date.now();
 
   try {
-    const { snapshot, expectedHash } = req.body;
+    const { snapshot, expectedHash, expectedAnimationHash, expectedPosterHash } = req.body;
 
     if (!snapshot || typeof snapshot !== "object") {
       return res.status(400).json({
@@ -229,10 +229,113 @@ app.post("/verify", (req, res) => {
       });
     }
 
+    const { code, seed, vars, execution } = snapshot;
+    const isLoopMode = detectLoopMode(code, execution);
+
+    if (isLoopMode) {
+      // Loop mode verification
+      if (!expectedAnimationHash && !expectedPosterHash && !expectedHash) {
+        return res.status(400).json({
+          error: "INVALID_REQUEST",
+          message: "Loop mode requires expectedAnimationHash, expectedPosterHash, or expectedHash",
+        });
+      }
+
+      const totalFrames = execution?.totalFrames || 120;
+      const fps = execution?.fps || 30;
+
+      if (totalFrames < 2) {
+        return res.status(400).json({
+          error: "LOOP_MODE_ERROR",
+          message: "Loop mode requires totalFrames >= 2",
+        });
+      }
+
+      console.log(`[VERIFY LOOP MODE] Re-rendering ${totalFrames} frames at ${fps}fps`);
+
+      const result = await renderLoop({
+        code,
+        seed,
+        vars,
+        totalFrames,
+        fps,
+        width: CANVAS_WIDTH,
+        height: CANVAS_HEIGHT,
+      });
+
+      const computedAnimationHash = result.animationHash;
+      const computedPosterHash = result.posterHash;
+
+      // Determine verification result
+      let animationVerified = true;
+      let posterVerified = true;
+
+      if (expectedAnimationHash) {
+        animationVerified = computedAnimationHash === expectedAnimationHash;
+      }
+      if (expectedPosterHash) {
+        posterVerified = computedPosterHash === expectedPosterHash;
+      }
+
+      // If only expectedHash provided, check against both (poster takes precedence for backward compat)
+      let hashMatchType = null;
+      if (expectedHash && !expectedAnimationHash && !expectedPosterHash) {
+        if (computedPosterHash === expectedHash) {
+          posterVerified = true;
+          hashMatchType = "poster";
+        } else if (computedAnimationHash === expectedHash) {
+          animationVerified = true;
+          hashMatchType = "animation";
+        } else {
+          animationVerified = false;
+          posterVerified = false;
+        }
+      }
+
+      const verified = animationVerified && posterVerified;
+      const executionTime = Date.now() - startTime;
+
+      const response = {
+        verified,
+        mode: "loop",
+        computedAnimationHash,
+        computedPosterHash,
+        protocolCompliant: verified,
+        metadata: {
+          sdk_version: SDK_VERSION,
+          protocol_version: PROTOCOL_VERSION,
+          node_version: NODE_VERSION,
+          execution_time_ms: executionTime,
+          timestamp: new Date().toISOString(),
+          frames: totalFrames,
+          fps,
+        },
+      };
+
+      // Include expected hashes in response
+      if (expectedAnimationHash) {
+        response.expectedAnimationHash = expectedAnimationHash;
+        response.animationVerified = computedAnimationHash === expectedAnimationHash;
+      }
+      if (expectedPosterHash) {
+        response.expectedPosterHash = expectedPosterHash;
+        response.posterVerified = computedPosterHash === expectedPosterHash;
+      }
+      if (expectedHash) {
+        response.expectedHash = expectedHash;
+        if (hashMatchType) {
+          response.hashMatchType = hashMatchType;
+        }
+      }
+
+      return res.json(response);
+    }
+
+    // Static mode verification (original behavior)
     if (!expectedHash || typeof expectedHash !== "string") {
       return res.status(400).json({
         error: "INVALID_REQUEST",
-        message: "Must provide expectedHash string",
+        message: "Static mode requires expectedHash string",
       });
     }
 
@@ -244,6 +347,7 @@ app.post("/verify", (req, res) => {
 
     res.json({
       verified,
+      mode: "static",
       computedHash,
       expectedHash,
       protocolCompliant: verified,
@@ -257,6 +361,15 @@ app.post("/verify", (req, res) => {
     });
   } catch (error) {
     console.error("Verification error:", error);
+    
+    if (error.message && error.message.startsWith("LOOP_MODE_ERROR:")) {
+      return res.status(400).json({
+        error: "LOOP_MODE_ERROR",
+        message: error.message.replace("LOOP_MODE_ERROR: ", ""),
+        verified: false,
+      });
+    }
+    
     res.status(500).json({
       error: "VERIFICATION_ERROR",
       message: error.message,
