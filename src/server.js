@@ -24,7 +24,7 @@ const PORT = process.env.PORT || 5000;
 const CANVAS_WIDTH = 1950;
 const CANVAS_HEIGHT = 2400;
 const NODE_VERSION = "1.0.0";
-const SDK_VERSION = "1.5.0";
+const SDK_VERSION = "1.6.0";
 const PROTOCOL_VERSION = CODE_MODE_PROTOCOL_VERSION || "1.0.0";
 
 function computeHash(buffer) {

@@ -114,7 +114,7 @@ Public availability does not imply that forks inherit compliance status.
 | Component | Version |
 |-----------|---------|
 | Node | 1.0.0 |
-| SDK | 1.5.0 |
+| SDK | 1.6.0 |
 | Protocol | 1.2.0 |
 
 ## Deployment
