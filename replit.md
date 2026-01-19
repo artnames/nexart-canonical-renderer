@@ -202,7 +202,7 @@ Content-Type: application/json
 }
 ```
 
-**Backward Compatibility:** If only `expectedHash` is provided for loop mode, it checks against both posterHash and animationHash, returning `hashMatchType` to indicate which matched.
+**Backward Compatibility:** If only `expectedHash` is provided for loop mode, it checks against both posterHash and animationHash. Response includes `animationVerified`, `posterVerified`, and `hashMatchType` to indicate which matched. Note: `verified` will only be `true` if BOTH hashes match the provided `expectedHash` (extremely rare). For proper loop verification, always provide both `expectedAnimationHash` AND `expectedPosterHash`.
 
 ## Version Info
 

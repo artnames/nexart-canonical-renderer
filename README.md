@@ -78,7 +78,9 @@ Only canonical outputs are recorded on-chain.
 The `/verify` endpoint supports both static and loop mode verification:
 
 - **Static**: Provide `expectedHash` (SHA-256 of PNG bytes)
-- **Loop**: Provide `expectedAnimationHash` (SHA-256 of MP4 bytes) and/or `expectedPosterHash` (SHA-256 of first frame PNG)
+- **Loop**: Provide both `expectedAnimationHash` (SHA-256 of MP4 bytes) AND `expectedPosterHash` (SHA-256 of first frame PNG)
+
+For loop mode, `verified: true` requires all provided expected hashes to match their computed counterparts.
 
 ## Who Should Use This
 
