@@ -70,6 +70,7 @@ function executeSnapshot(snapshot) {
   
   injectProtocolVariables(p, normalizedVars);
   
+  // Inject time variables for setup() with frameCount: 0
   injectTimeVariables(p, {
     frameCount: 0,
     t: 0,
@@ -77,6 +78,7 @@ function executeSnapshot(snapshot) {
     tGlobal: 0,
   });
 
+  // Extract setup() body
   const setupMatch = code.match(
     /function\s+setup\s*\(\s*\)\s*\{([\s\S]*?)\}(?=\s*function|\s*$)/
   );
@@ -92,9 +94,40 @@ function executeSnapshot(snapshot) {
     `with(p) { ${setupCode} }`
   );
 
+  // Run setup() once
   wrappedSetup(p, p.VAR, 0, 0, 0, 0);
 
-  return canvas;
+  // Extract draw() body and run once if it exists
+  const drawMatch = code.match(
+    /function\s+draw\s*\(\s*\)\s*\{([\s\S]*?)\}(?=\s*function|\s*$)/
+  );
+  
+  if (drawMatch) {
+    const drawCode = drawMatch[1].trim();
+    
+    // Inject time variables for draw() with frameCount: 1
+    injectTimeVariables(p, {
+      frameCount: 1,
+      t: 0,
+      time: 0,
+      tGlobal: 0,
+    });
+    
+    const wrappedDraw = new Function(
+      "p",
+      "VAR",
+      "frameCount",
+      "t",
+      "time",
+      "tGlobal",
+      `with(p) { ${drawCode} }`
+    );
+    
+    // Run draw() once for static mode
+    wrappedDraw(p, p.VAR, 1, 0, 0, 0);
+  }
+
+  return { canvas, numericSeed, normalizedVars, codeLength: code.length };
 }
 
 app.use(express.json({ limit: "10mb" }));
@@ -192,7 +225,11 @@ app.post("/render", async (req, res) => {
       });
     }
 
-    const canvas = executeSnapshot(snapshot);
+    const { canvas, numericSeed, normalizedVars, codeLength } = executeSnapshot(snapshot);
+    
+    // Debug log to prove inputs differ
+    console.log(`[STATIC MODE] seed=${numericSeed}, VAR=[${normalizedVars.slice(0, 3).join(',')}], codeLen=${codeLength}`);
+    
     const pngBuffer = canvas.toBuffer("image/png");
     const imageHash = computeHash(pngBuffer);
     const executionTime = Date.now() - startTime;
@@ -374,7 +411,7 @@ app.post("/verify", async (req, res) => {
       });
     }
 
-    const canvas = executeSnapshot(snapshot);
+    const { canvas } = executeSnapshot(snapshot);
     const pngBuffer = canvas.toBuffer("image/png");
     const computedHash = computeHash(pngBuffer);
     const verified = computedHash === expectedHash;
