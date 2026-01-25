@@ -6,7 +6,7 @@ import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
 import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth } from "./db.js";
-import { createAuthMiddleware, createAdminAuthMiddleware, createUsageLogger } from "./auth.js";
+import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
   createP5Runtime,
   injectTimeVariables,
@@ -38,7 +38,6 @@ const SDK_VERSION = SDK_VERSION_FROM_SDK || "1.8.4";
 const PROTOCOL_VERSION = CODE_MODE_PROTOCOL_VERSION || "1.0.0";
 
 const apiKeyAuth = createAuthMiddleware();
-const adminAuth = createAdminAuthMiddleware();
 const logUsage = createUsageLogger(SDK_VERSION, PROTOCOL_VERSION, CANVAS_WIDTH, CANVAS_HEIGHT);
 
 function computeHash(buffer) {
@@ -548,7 +547,7 @@ app.post("/verify", async (req, res) => {
   }
 });
 
-app.get("/admin/usage/today", adminAuth, async (req, res) => {
+app.get("/admin/usage/today", requireAdmin, async (req, res) => {
   try {
     const usage = await getUsageToday();
     res.json({
@@ -565,7 +564,7 @@ app.get("/admin/usage/today", adminAuth, async (req, res) => {
   }
 });
 
-app.get("/admin/usage/month", adminAuth, async (req, res) => {
+app.get("/admin/usage/month", requireAdmin, async (req, res) => {
   try {
     const usage = await getUsageMonth();
     const now = new Date();

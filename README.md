@@ -271,18 +271,18 @@ Every `/api/render` request is logged to `usage_events`:
 
 ### Admin Endpoints
 
-Admin endpoints require the `ADMIN_SECRET` via Bearer token:
+Admin endpoints require the `X-Admin-Secret` header:
 
 **GET /admin/usage/today** - Today's usage grouped by API key and endpoint:
 ```bash
 curl http://localhost:5000/admin/usage/today \
-  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+  -H "X-Admin-Secret: YOUR_ADMIN_SECRET"
 ```
 
 **GET /admin/usage/month** - This month's usage:
 ```bash
 curl http://localhost:5000/admin/usage/month \
-  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+  -H "X-Admin-Secret: YOUR_ADMIN_SECRET"
 ```
 
 **Response format:**

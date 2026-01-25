@@ -81,15 +81,14 @@ export function createAdminAuthMiddleware() {
       });
     }
 
-    const authHeader = req.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    const providedSecret = req.get("X-Admin-Secret");
+    if (!providedSecret) {
       return res.status(401).json({
         error: "UNAUTHORIZED",
-        message: "Missing or invalid Authorization header"
+        message: "Missing X-Admin-Secret header"
       });
     }
 
-    const providedSecret = authHeader.slice(7);
     if (providedSecret !== adminSecret) {
       return res.status(401).json({
         error: "UNAUTHORIZED",
@@ -99,6 +98,27 @@ export function createAdminAuthMiddleware() {
 
     next();
   };
+}
+
+export function requireAdmin(req, res, next) {
+  const adminSecret = process.env.ADMIN_SECRET;
+  
+  if (!adminSecret) {
+    return res.status(503).json({
+      error: "ADMIN_NOT_CONFIGURED",
+      message: "ADMIN_SECRET environment variable not set"
+    });
+  }
+
+  const providedSecret = req.get("X-Admin-Secret");
+  if (!providedSecret || providedSecret !== adminSecret) {
+    return res.status(401).json({
+      error: "UNAUTHORIZED",
+      message: "Missing or invalid X-Admin-Secret header"
+    });
+  }
+
+  next();
 }
 
 export function createUsageLogger(sdkVersion, protocolVersion, canvasWidth, canvasHeight) {
