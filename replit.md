@@ -62,6 +62,7 @@ The SDK is imported via `createRequire()` workaround due to ESM compatibility is
 | `/health` | GET | Node status with version info |
 | `/version` | GET | Full version info (SDK, protocol, build) |
 | `/render` | POST | Execute snapshot (static or loop) |
+| `/api/render` | POST | CLI contract - static render (code, seed, VAR) |
 | `/verify` | POST | Verify execution against expected hash |
 
 ## Render Endpoint
@@ -86,7 +87,7 @@ Content-Type: application/json
   "imageHash": "<sha256>",
   "imageBase64": "<png-bytes>",
   "metadata": {
-    "sdk_version": "1.6.0",
+    "sdk_version": "1.8.4",
     "protocol_version": "1.0.0",
     "node_version": "1.0.0",
     "canvas": { "width": 1950, "height": 2400 },
@@ -130,7 +131,7 @@ Content-Type: application/json
   "height": 2400,
   "fps": 30,
   "metadata": {
-    "sdk_version": "1.6.0",
+    "sdk_version": "1.8.4",
     "protocol_version": "1.0.0",
     "node_version": "1.0.0",
     "canvas": { "width": 1950, "height": 2400 },
@@ -207,7 +208,7 @@ Content-Type: application/json
 
 ## Version Info
 
-- SDK Version: 1.6.0
+- SDK Version: 1.8.4
 - Protocol Version: 1.2.0
 - Node Version: 1.0.0
 

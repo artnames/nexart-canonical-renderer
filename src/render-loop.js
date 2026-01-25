@@ -4,19 +4,12 @@ import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { createRequire } from "module";
-import { fileURLToPath } from "url";
 import { extendP5Runtime } from "./p5-extensions.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const require = createRequire(import.meta.url);
-const sdkPath = path.resolve(__dirname, "../node_modules/@nexart/codemode-sdk/dist/p5-runtime.js");
-const { 
-  createP5Runtime, 
-  injectTimeVariables, 
-  injectProtocolVariables 
-} = require(sdkPath);
+import {
+  createP5Runtime,
+  injectTimeVariables,
+  injectProtocolVariables
+} from "@nexart/codemode-sdk/node";
 
 function computeHash(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");

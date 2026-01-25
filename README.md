@@ -72,7 +72,7 @@ curl http://localhost:5000/version
 This server pins `@nexart/codemode-sdk` to an **exact version**:
 
 ```json
-"@nexart/codemode-sdk": "1.6.0"
+"@nexart/codemode-sdk": "1.8.4"
 ```
 
 No `^` or `~` ranges. This ensures:
@@ -87,7 +87,7 @@ Every verification/attestation response includes version metadata:
 ```json
 {
   "metadata": {
-    "sdk_version": "1.6.0",
+    "sdk_version": "1.8.4",
     "protocol_version": "1.2.0",
     "node_version": "1.0.0"
   }
@@ -126,6 +126,7 @@ The Node server is optional; it provides hosted third-party trust when run by Ne
 | `/health` | GET | Node status |
 | `/version` | GET | Full version info (SDK, protocol, build) |
 | `/render` | POST | Execute snapshot, return output + hash |
+| `/api/render` | POST | CLI contract - static render (code, seed, VAR) |
 | `/verify` | POST | Re-execute, compare against expected hash |
 
 ### GET /version
@@ -140,14 +141,57 @@ curl http://localhost:5000/version
 {
   "service": "nexart-node",
   "serviceVersion": "0.1.0",
-  "sdkVersion": "1.6.0",
-  "sdkDependency": "1.6.0",
+  "sdkVersion": "1.8.4",
+  "sdkDependency": "1.8.4",
   "protocolVersion": "1.2.0",
   "serviceBuild": "abc1234",
   "nodeVersion": "v20.x.x",
   "timestamp": "2025-01-25T..."
 }
 ```
+
+### POST /api/render (CLI Contract)
+
+This endpoint is designed for CLI compatibility (nexart-cli v0.2.1+):
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/render \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "function setup() { background(50); ellipse(width/2, height/2, 200); }",
+    "seed": "my-seed",
+    "VAR": [50, 25, 0, 0, 0, 0, 0, 0, 0, 0],
+    "width": 1950,
+    "height": 2400,
+    "protocolVersion": "1.2.0"
+  }' \
+  --output render.png
+```
+
+**Response (default):** Binary PNG with headers:
+- `Content-Type: image/png`
+- `X-Runtime-Hash: <sha256>`
+- `X-SDK-Version: 1.8.4`
+- `X-Protocol-Version: 1.2.0`
+
+**Response (JSON):** Add `Accept: application/json` header:
+```json
+{
+  "pngBase64": "<base64-encoded-png>",
+  "runtimeHash": "<sha256>",
+  "width": 1950,
+  "height": 2400,
+  "sdkVersion": "1.8.4",
+  "protocolVersion": "1.2.0",
+  "executionTimeMs": 123
+}
+```
+
+**Notes:**
+- `width` and `height` are validated but must match protocol (1950x2400)
+- `VAR` is an array of 10 values (0-100 range)
+- If `VAR` is omitted, defaults to `[0,0,0,0,0,0,0,0,0,0]`
 
 ### Verification
 
@@ -192,7 +236,7 @@ Forks are **not** compliant by default.
 | Component | Version |
 |-----------|---------|
 | Service | 0.1.0 |
-| SDK | 1.6.0 (exact pin) |
+| SDK | 1.8.4 (exact pin) |
 | Protocol | 1.2.0 |
 
 ## Deployment

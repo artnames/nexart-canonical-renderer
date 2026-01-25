@@ -114,7 +114,7 @@ Snapshot (code, seed, vars)
 This node uses **exact version pinning** for the SDK:
 
 ```json
-"@nexart/codemode-sdk": "1.6.0"
+"@nexart/codemode-sdk": "1.8.4"
 ```
 
 This ensures:
@@ -133,7 +133,7 @@ Every verification/attestation response includes:
 
 ```json
 {
-  "sdkVersion": "1.6.0",
+  "sdkVersion": "1.8.4",
   "protocolVersion": "1.2.0",
   "serviceVersion": "1.0.0",
   "serviceBuild": "<git-sha>"

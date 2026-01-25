@@ -2,23 +2,16 @@ import express from "express";
 import cors from "cors";
 import { createCanvas } from "canvas";
 import crypto from "crypto";
-import { createRequire } from "module";
-import path from "path";
-import { fileURLToPath } from "url";
 import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const require = createRequire(import.meta.url);
-const sdkPath = path.resolve(__dirname, "../node_modules/@nexart/codemode-sdk/dist/p5-runtime.js");
-const { 
-  createP5Runtime, 
-  injectTimeVariables, 
+import {
+  createP5Runtime,
+  injectTimeVariables,
   injectProtocolVariables,
-  CODE_MODE_PROTOCOL_VERSION
-} = require(sdkPath);
+  CODE_MODE_PROTOCOL_VERSION,
+  SDK_VERSION as SDK_VERSION_FROM_SDK
+} from "@nexart/codemode-sdk/node";
 
 const app = express();
 
@@ -39,7 +32,7 @@ const PORT = process.env.PORT || 5000;
 const CANVAS_WIDTH = 1950;
 const CANVAS_HEIGHT = 2400;
 const NODE_VERSION = "1.0.0";
-const SDK_VERSION = "1.6.0";
+const SDK_VERSION = SDK_VERSION_FROM_SDK || "1.8.4";
 const PROTOCOL_VERSION = CODE_MODE_PROTOCOL_VERSION || "1.0.0";
 
 function computeHash(buffer) {
@@ -157,6 +150,74 @@ app.get("/version", (req, res) => {
     nodeVersion: versionInfo.nodeVersion,
     timestamp: new Date().toISOString(),
   });
+});
+
+app.post("/api/render", async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    const { code, seed, VAR, width, height, protocolVersion: reqProtocolVersion } = req.body;
+
+    if (!code || typeof code !== "string") {
+      return res.status(400).json({
+        error: "INVALID_REQUEST",
+        message: "code is required and must be a string",
+      });
+    }
+
+    if (width && width !== CANVAS_WIDTH) {
+      return res.status(400).json({
+        error: "PROTOCOL_VIOLATION",
+        message: `Canvas width must be ${CANVAS_WIDTH}, got ${width}`,
+      });
+    }
+
+    if (height && height !== CANVAS_HEIGHT) {
+      return res.status(400).json({
+        error: "PROTOCOL_VIOLATION",
+        message: `Canvas height must be ${CANVAS_HEIGHT}, got ${height}`,
+      });
+    }
+
+    const vars = Array.isArray(VAR) ? VAR : new Array(10).fill(0);
+
+    const snapshot = { code, seed: seed || "default", vars };
+    const { canvas } = executeSnapshot(snapshot);
+
+    const pngBuffer = canvas.toBuffer("image/png");
+    const runtimeHash = computeHash(pngBuffer);
+
+    const acceptHeader = req.get("Accept") || "";
+    if (acceptHeader.includes("application/json")) {
+      res.json({
+        pngBase64: pngBuffer.toString("base64"),
+        runtimeHash,
+        width: CANVAS_WIDTH,
+        height: CANVAS_HEIGHT,
+        sdkVersion: SDK_VERSION,
+        protocolVersion: PROTOCOL_VERSION,
+        executionTimeMs: Date.now() - startTime,
+      });
+    } else {
+      res.set("Content-Type", "image/png");
+      res.set("X-Runtime-Hash", runtimeHash);
+      res.set("X-SDK-Version", SDK_VERSION);
+      res.set("X-Protocol-Version", PROTOCOL_VERSION);
+      res.send(pngBuffer);
+    }
+  } catch (error) {
+    if (error.message && error.message.startsWith("PROTOCOL_VIOLATION:")) {
+      return res.status(400).json({
+        error: "PROTOCOL_VIOLATION",
+        message: error.message.replace("PROTOCOL_VIOLATION: ", ""),
+      });
+    }
+    
+    res.status(500).json({
+      error: "RENDER_ERROR",
+      message: error.message,
+    });
+  }
 });
 
 function detectLoopMode(code, execution) {
@@ -488,10 +549,11 @@ app.listen(PORT, "0.0.0.0", () => {
 ║    Loop:   setup() + draw() × N → MP4 video                                  ║
 ║                                                                              ║
 ║  Endpoints:                                                                  ║
-║    GET  /health   - Node status                                              ║
-║    GET  /version  - Full version info (SDK, protocol, build)                 ║
-║    POST /render   - Execute snapshot (static or loop)                        ║
-║    POST /verify   - Verify execution against expected hash                   ║
+║    GET  /health     - Node status                                            ║
+║    GET  /version    - Full version info (SDK, protocol, build)               ║
+║    POST /render     - Execute snapshot (static or loop)                      ║
+║    POST /api/render - CLI contract (code, seed, VAR)                         ║
+║    POST /verify     - Verify execution against expected hash                 ║
 ║                                                                              ║
 ║  Running on port ${PORT}                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
