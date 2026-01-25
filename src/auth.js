@@ -1,5 +1,13 @@
 import { validateApiKey, logUsageEvent } from "./db.js";
 
+function isMeteringRequired() {
+  const env = process.env.METERING_REQUIRED;
+  if (env === undefined || env === null || env === "") {
+    return process.env.NODE_ENV === "production";
+  }
+  return env.toLowerCase() !== "false" && env !== "0";
+}
+
 export function createAuthMiddleware() {
   return async (req, res, next) => {
     const startTime = Date.now();
@@ -26,19 +34,17 @@ export function createAuthMiddleware() {
 
     if (!validation.valid) {
       if (validation.reason === "database_unavailable" || validation.reason === "database_error") {
-        res.status(503).json({
-          error: "SERVICE_UNAVAILABLE",
-          message: "Database not available. Please try again later."
-        });
-
-        logUsageEvent({
-          apiKeyId: null,
-          endpoint: req.path,
-          statusCode: 503,
-          durationMs: Date.now() - startTime,
-          error: validation.reason
-        });
-        return;
+        if (isMeteringRequired()) {
+          res.status(503).json({
+            error: "SERVICE_UNAVAILABLE",
+            message: "Database not available. Please try again later."
+          });
+          return;
+        }
+        
+        req.meteringSkipped = true;
+        req.startTime = startTime;
+        return next();
       }
 
       res.status(401).json({

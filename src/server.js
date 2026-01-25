@@ -196,6 +196,10 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     const pngBuffer = canvas.toBuffer("image/png");
     runtimeHash = computeHash(pngBuffer);
 
+    if (req.meteringSkipped) {
+      res.set("X-NexArt-Metering", "skipped");
+    }
+
     const acceptHeader = req.get("Accept") || "";
     if (acceptHeader.includes("application/json")) {
       res.json({
@@ -215,17 +219,23 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
       res.send(pngBuffer);
     }
     
-    logUsage(req, res, runtimeHash, null);
+    if (!req.meteringSkipped) {
+      logUsage(req, res, runtimeHash, null);
+    }
   } catch (error) {
     if (error.message && error.message.startsWith("PROTOCOL_VIOLATION:")) {
-      logUsage(req, res.status(400), null, error.message);
+      if (!req.meteringSkipped) {
+        logUsage(req, res.status(400), null, error.message);
+      }
       return res.json({
         error: "PROTOCOL_VIOLATION",
         message: error.message.replace("PROTOCOL_VIOLATION: ", ""),
       });
     }
     
-    logUsage(req, res.status(500), null, error.message);
+    if (!req.meteringSkipped) {
+      logUsage(req, res.status(500), null, error.message);
+    }
     res.json({
       error: "RENDER_ERROR",
       message: error.message,

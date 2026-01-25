@@ -216,10 +216,15 @@ curl -I -X OPTIONS http://localhost:5000/health \
 
 ### Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `ADMIN_SECRET` | Yes | Secret for admin endpoints |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DATABASE_URL` | Yes | - | PostgreSQL connection string |
+| `ADMIN_SECRET` | Yes | - | Secret for admin endpoints |
+| `METERING_REQUIRED` | No | `true` in production | If `false`, allows renders when DB unavailable (skips logging) |
+
+**METERING_REQUIRED behavior:**
+- `true` (default in production): If DB is unavailable, `/api/render` returns 503
+- `false`: If DB is unavailable, renders proceed but usage is not logged. Response includes header `X-NexArt-Metering: skipped`
 
 ### API Key Authentication
 
