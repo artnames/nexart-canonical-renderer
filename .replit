@@ -44,3 +44,8 @@ outputType = "webview"
 
 [agent]
 expertMode = true
+
+[userenv]
+
+[userenv.development]
+ADMIN_SECRET = "test-admin-secret-67890"

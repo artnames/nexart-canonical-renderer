@@ -212,6 +212,21 @@ Content-Type: application/json
 - Protocol Version: 1.2.0
 - Node Version: 1.0.0
 
+## Authentication & Metering (Phase 1)
+
+### Environment Variables
+- `DATABASE_URL`: PostgreSQL connection string (auto-configured in Replit)
+- `ADMIN_SECRET`: Secret for admin endpoints
+
+### API Key Auth
+- `/api/render` requires `Authorization: Bearer <api_key>`
+- Keys are SHA-256 hashed and stored in `api_keys` table
+- Usage is logged to `usage_events` table
+
+### Admin Endpoints
+- `GET /admin/usage/today` - Today's usage (requires ADMIN_SECRET)
+- `GET /admin/usage/month` - This month's usage (requires ADMIN_SECRET)
+
 ## Deployment
 
 The node is configured for Railway deployment via Dockerfile.

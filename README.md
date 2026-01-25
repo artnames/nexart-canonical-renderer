@@ -212,6 +212,132 @@ curl -I -X OPTIONS http://localhost:5000/health \
   -H "Access-Control-Request-Method: POST"
 ```
 
+## Authentication & Metering (Phase 1)
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `ADMIN_SECRET` | Yes | Secret for admin endpoints |
+
+### API Key Authentication
+
+The `/api/render` endpoint requires an API key. Pass it via the `Authorization` header:
+
+```bash
+curl -X POST http://localhost:5000/api/render \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "function setup() { background(100); }", "seed": "test"}'
+```
+
+**Without a valid API key, you get a 401 response:**
+```json
+{
+  "error": "UNAUTHORIZED",
+  "message": "Missing or invalid Authorization header. Use: Authorization: Bearer <api_key>"
+}
+```
+
+### Creating an API Key
+
+1. Generate a random API key:
+```bash
+API_KEY=$(openssl rand -hex 32)
+echo "API Key: $API_KEY"
+```
+
+2. Hash it with SHA-256:
+```bash
+KEY_HASH=$(echo -n "$API_KEY" | shasum -a 256 | cut -d' ' -f1)
+echo "Key Hash: $KEY_HASH"
+```
+
+3. Insert into the database:
+```sql
+INSERT INTO api_keys (key_hash, label, plan, status, monthly_limit)
+VALUES ('YOUR_KEY_HASH', 'My App', 'free', 'active', 1000);
+```
+
+### Usage Logging
+
+Every `/api/render` request is logged to `usage_events`:
+- `api_key_id`: Which key made the request
+- `endpoint`, `status_code`, `duration_ms`
+- `width`, `height`, `sdk_version`, `protocol_version`
+- `runtime_hash`, `output_hash_prefix`
+- `error`: Error message if any
+
+### Admin Endpoints
+
+Admin endpoints require the `ADMIN_SECRET` via Bearer token:
+
+**GET /admin/usage/today** - Today's usage grouped by API key and endpoint:
+```bash
+curl http://localhost:5000/admin/usage/today \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+```
+
+**GET /admin/usage/month** - This month's usage:
+```bash
+curl http://localhost:5000/admin/usage/month \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+```
+
+**Response format:**
+```json
+{
+  "period": "today",
+  "date": "2026-01-25",
+  "usage": [
+    {
+      "api_key_id": 1,
+      "endpoint": "/api/render",
+      "count": "42",
+      "success_count": "40",
+      "error_count": "2",
+      "avg_duration_ms": 150
+    }
+  ],
+  "total": 42
+}
+```
+
+### Database Schema
+
+**api_keys:**
+```sql
+CREATE TABLE api_keys (
+    id SERIAL PRIMARY KEY,
+    key_hash VARCHAR(64) NOT NULL UNIQUE,
+    label VARCHAR(255) NOT NULL,
+    plan VARCHAR(50) NOT NULL DEFAULT 'free',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    monthly_limit INTEGER DEFAULT 1000,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+**usage_events:**
+```sql
+CREATE TABLE usage_events (
+    id SERIAL PRIMARY KEY,
+    ts TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    api_key_id INTEGER REFERENCES api_keys(id),
+    endpoint VARCHAR(100) NOT NULL,
+    status_code INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    sdk_version VARCHAR(20),
+    protocol_version VARCHAR(20),
+    runtime_hash VARCHAR(64),
+    output_hash_prefix VARCHAR(16),
+    error TEXT
+);
+```
+
 ## Who Should Use This
 
 - Platform operators running NexArt-compatible minting infrastructure

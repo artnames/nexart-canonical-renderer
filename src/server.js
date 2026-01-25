@@ -5,6 +5,8 @@ import crypto from "crypto";
 import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
+import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth } from "./db.js";
+import { createAuthMiddleware, createAdminAuthMiddleware, createUsageLogger } from "./auth.js";
 import {
   createP5Runtime,
   injectTimeVariables,
@@ -34,6 +36,10 @@ const CANVAS_HEIGHT = 2400;
 const NODE_VERSION = "1.0.0";
 const SDK_VERSION = SDK_VERSION_FROM_SDK || "1.8.4";
 const PROTOCOL_VERSION = CODE_MODE_PROTOCOL_VERSION || "1.0.0";
+
+const apiKeyAuth = createAuthMiddleware();
+const adminAuth = createAdminAuthMiddleware();
+const logUsage = createUsageLogger(SDK_VERSION, PROTOCOL_VERSION, CANVAS_WIDTH, CANVAS_HEIGHT);
 
 function computeHash(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
@@ -152,28 +158,32 @@ app.get("/version", (req, res) => {
   });
 });
 
-app.post("/api/render", async (req, res) => {
-  const startTime = Date.now();
+app.post("/api/render", apiKeyAuth, async (req, res) => {
+  const startTime = req.startTime || Date.now();
+  let runtimeHash = null;
 
   try {
     const { code, seed, VAR, width, height, protocolVersion: reqProtocolVersion } = req.body;
 
     if (!code || typeof code !== "string") {
-      return res.status(400).json({
+      logUsage(req, res.status(400), null, "code_required");
+      return res.json({
         error: "INVALID_REQUEST",
         message: "code is required and must be a string",
       });
     }
 
     if (width && width !== CANVAS_WIDTH) {
-      return res.status(400).json({
+      logUsage(req, res.status(400), null, "invalid_width");
+      return res.json({
         error: "PROTOCOL_VIOLATION",
         message: `Canvas width must be ${CANVAS_WIDTH}, got ${width}`,
       });
     }
 
     if (height && height !== CANVAS_HEIGHT) {
-      return res.status(400).json({
+      logUsage(req, res.status(400), null, "invalid_height");
+      return res.json({
         error: "PROTOCOL_VIOLATION",
         message: `Canvas height must be ${CANVAS_HEIGHT}, got ${height}`,
       });
@@ -185,7 +195,7 @@ app.post("/api/render", async (req, res) => {
     const { canvas } = executeSnapshot(snapshot);
 
     const pngBuffer = canvas.toBuffer("image/png");
-    const runtimeHash = computeHash(pngBuffer);
+    runtimeHash = computeHash(pngBuffer);
 
     const acceptHeader = req.get("Accept") || "";
     if (acceptHeader.includes("application/json")) {
@@ -205,15 +215,19 @@ app.post("/api/render", async (req, res) => {
       res.set("X-Protocol-Version", PROTOCOL_VERSION);
       res.send(pngBuffer);
     }
+    
+    logUsage(req, res, runtimeHash, null);
   } catch (error) {
     if (error.message && error.message.startsWith("PROTOCOL_VIOLATION:")) {
-      return res.status(400).json({
+      logUsage(req, res.status(400), null, error.message);
+      return res.json({
         error: "PROTOCOL_VIOLATION",
         message: error.message.replace("PROTOCOL_VIOLATION: ", ""),
       });
     }
     
-    res.status(500).json({
+    logUsage(req, res.status(500), null, error.message);
+    res.json({
       error: "RENDER_ERROR",
       message: error.message,
     });
@@ -534,7 +548,46 @@ app.post("/verify", async (req, res) => {
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+app.get("/admin/usage/today", adminAuth, async (req, res) => {
+  try {
+    const usage = await getUsageToday();
+    res.json({
+      period: "today",
+      date: new Date().toISOString().split("T")[0],
+      usage,
+      total: usage.reduce((sum, row) => sum + parseInt(row.count), 0)
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "ADMIN_ERROR",
+      message: error.message
+    });
+  }
+});
+
+app.get("/admin/usage/month", adminAuth, async (req, res) => {
+  try {
+    const usage = await getUsageMonth();
+    const now = new Date();
+    res.json({
+      period: "month",
+      month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
+      usage,
+      total: usage.reduce((sum, row) => sum + parseInt(row.count), 0)
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "ADMIN_ERROR",
+      message: error.message
+    });
+  }
+});
+
+async function startServer() {
+  console.log("[STARTUP] Running database migrations...");
+  await runMigrations();
+  
+  app.listen(PORT, "0.0.0.0", () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║  NexArt Canonical Node v${NODE_VERSION}                                                  ║
@@ -549,13 +602,17 @@ app.listen(PORT, "0.0.0.0", () => {
 ║    Loop:   setup() + draw() × N → MP4 video                                  ║
 ║                                                                              ║
 ║  Endpoints:                                                                  ║
-║    GET  /health     - Node status                                            ║
-║    GET  /version    - Full version info (SDK, protocol, build)               ║
-║    POST /render     - Execute snapshot (static or loop)                      ║
-║    POST /api/render - CLI contract (code, seed, VAR)                         ║
-║    POST /verify     - Verify execution against expected hash                 ║
+║    GET  /health         - Node status (public)                               ║
+║    GET  /version        - Full version info (public)                         ║
+║    POST /render         - Execute snapshot (public)                          ║
+║    POST /api/render     - CLI contract (API key required)                    ║
+║    POST /verify         - Verify execution (public)                          ║
+║    GET  /admin/usage/*  - Usage stats (ADMIN_SECRET required)                ║
 ║                                                                              ║
 ║  Running on port ${PORT}                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
   `);
-});
+  });
+}
+
+startServer();
