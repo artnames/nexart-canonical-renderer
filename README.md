@@ -1,36 +1,43 @@
 # NexArt Canonical Renderer
 
-Reference implementation of NexArt Protocol rendering. This server-side node provides deterministic execution of Code Mode artworks for minting, verification, and on-chain attestation.
+Hosted verification, attestation, and replay services built on the NexArt CodeMode SDK. This server-side node provides deterministic execution of Code Mode artworks for minting, verification, and on-chain attestation.
 
-## Protocol Compliance Status
+## What This Server Is
 
-| Status | Description |
-|--------|-------------|
-| **This Repository** | Canonical Reference Implementation |
-| **Forks** | Not compliant by default |
+- **Hosted verification API** for third-party trust
+- **Attestation service** producing cryptographically verifiable outputs
+- **Replay service** for re-executing snapshots with identical results
+- **Ground truth** for minted artwork appearance (when NexArt-operated)
 
-Forks that modify deterministic behavior or deviate from SDK semantics produce invalid outputs for NexArt on-chain records.
+## What This Server Is NOT
 
-## What This Node Is
+- **Not required for local execution** - The SDK/CLI handles that
+- **Not a replacement for the SDK** - This service uses the SDK internally
+- **Not a frontend application** or preview renderer
+- **Not a development environment** for artists
 
-- Reference implementation of NexArt Protocol rendering
-- Attestation service producing cryptographically verifiable outputs
-- Ground truth for minted artwork appearance
-- Verification endpoint for hash comparison
+## Core vs Edges
 
-## What This Node Is NOT
+| Layer | Component | Cost | Purpose |
+|-------|-----------|------|---------|
+| **Core** | `@nexart/codemode-sdk` | Free | Deterministic primitives (PRNG, noise) |
+| **Core** | `nexart-cli` | Free | Local rendering, snapshot creation |
+| **Edge** | This Node (self-hosted) | Free | Self-hosted verification |
+| **Edge** | This Node (NexArt-operated) | Paid* | "NexArt Attested" signatures, SLAs |
 
-- A frontend application
-- A real-time preview renderer
-- A development environment for artists
-- A general-purpose p5.js runtime
+*Monetization via accounts/quotas/SLAs when operated by NexArt. Self-hosting is always free.
+
+### Attestation Types
+
+- **NexArt Attested**: Rendered/verified by NexArt infrastructure. Recognized for official on-chain records.
+- **Self Attested**: Rendered by self-hosted node or local CLI. Cryptographically identical, but no NexArt signature.
 
 ## Authority Chain
 
 ```
 NexArt Protocol Specification
         ↓
-@nexart/codemode-sdk
+@nexart/codemode-sdk (single source of truth)
         ↓
 Canonical Renderer (this repository)
         ↓
@@ -39,17 +46,64 @@ Applications (NexArt, ByX, third parties)
 
 The SDK is the single source of truth for deterministic primitives. All compliant renderers must use it.
 
-## Preview vs. Canonical Rendering
+## Quickstart (Development)
 
-| Aspect | Preview | Canonical |
-|--------|---------|-----------|
-| Environment | Browser | Server (this node) |
-| Purpose | Artist feedback | Minting, attestation |
-| Output | Visual display | Image/video + SHA-256 |
-| Determinism | Best effort | Protocol-enforced |
-| Authority | None | Binding for on-chain records |
+```bash
+# Clone and install
+git clone https://github.com/nexart/nexart-canonical-renderer.git
+cd nexart-canonical-renderer
+npm install
 
-Only canonical outputs are recorded on-chain.
+# Set environment (optional)
+export GIT_SHA=$(git rev-parse --short HEAD)
+
+# Run locally
+npm run dev
+
+# Test endpoints
+curl http://localhost:5000/health
+curl http://localhost:5000/version
+```
+
+## Versioning & Reproducibility
+
+### SDK Pinning
+
+This server pins `@nexart/codemode-sdk` to an **exact version**:
+
+```json
+"@nexart/codemode-sdk": "1.6.0"
+```
+
+No `^` or `~` ranges. This ensures:
+- Reproducible builds across deployments
+- Auditable dependency chain
+- No surprise behavior changes
+
+### Version Visibility
+
+Every verification/attestation response includes version metadata:
+
+```json
+{
+  "metadata": {
+    "sdk_version": "1.6.0",
+    "protocol_version": "1.2.0",
+    "node_version": "1.0.0"
+  }
+}
+```
+
+Use `GET /version` for complete version info including build SHA.
+
+### Reproducing Results Locally
+
+If you have a snapshot created by the CLI:
+1. Install the same SDK version locally
+2. Run the snapshot through the CLI
+3. Compare the SHA-256 hash - it must match
+
+The Node server is optional; it provides hosted third-party trust when run by NexArt.
 
 ## Protocol Invariants
 
@@ -61,7 +115,7 @@ Only canonical outputs are recorded on-chain.
 
 ## Execution Modes
 
-**Static**: Executes `setup()` once, returns PNG.
+**Static**: Executes `setup()` + `draw()` once, returns PNG.
 
 **Loop**: Executes `setup()` + `draw()` for N frames, returns MP4. Fails if `draw()` is absent.
 
@@ -70,30 +124,49 @@ Only canonical outputs are recorded on-chain.
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Node status |
+| `/version` | GET | Full version info (SDK, protocol, build) |
 | `/render` | POST | Execute snapshot, return output + hash |
-| `/verify` | POST | Re-execute, compare against expected hash (static or loop) |
+| `/verify` | POST | Re-execute, compare against expected hash |
+
+### GET /version
+
+Returns complete version information for auditing:
+
+```bash
+curl http://localhost:5000/version
+```
+
+```json
+{
+  "service": "nexart-node",
+  "serviceVersion": "0.1.0",
+  "sdkVersion": "1.6.0",
+  "sdkDependency": "1.6.0",
+  "protocolVersion": "1.2.0",
+  "serviceBuild": "abc1234",
+  "nodeVersion": "v20.x.x",
+  "timestamp": "2025-01-25T..."
+}
+```
 
 ### Verification
 
 The `/verify` endpoint supports both static and loop mode verification:
 
 - **Static**: Provide `expectedHash` (SHA-256 of PNG bytes)
-- **Loop**: Provide both `expectedAnimationHash` (SHA-256 of MP4 bytes) AND `expectedPosterHash` (SHA-256 of first frame PNG)
+- **Loop**: Provide both `expectedAnimationHash` AND `expectedPosterHash`
 
-For loop mode, `verified: true` requires all provided expected hashes to match their computed counterparts.
+For loop mode, `verified: true` requires all provided hashes to match.
 
 ### CORS
 
-The server allows cross-origin requests from any origin (`*`) to support browser clients on hosted platforms (e.g., `*.lovable.app`).
+The server allows cross-origin requests from any origin (`*`) to support browser clients.
 
-**Verify CORS headers:**
 ```bash
-curl -I -X OPTIONS https://your-renderer.railway.app/health \
+curl -I -X OPTIONS http://localhost:5000/health \
   -H "Origin: https://example.lovable.app" \
   -H "Access-Control-Request-Method: POST"
 ```
-
-In the browser, check that response headers include `access-control-allow-origin: *`.
 
 ## Who Should Use This
 
@@ -103,7 +176,7 @@ In the browser, check that response headers include `access-control-allow-origin
 
 Artists and collectors use applications that call this service on their behalf.
 
-## What Makes an Implementation Compliant
+## Protocol Compliance
 
 A renderer is **NexArt Protocol Compliant** if:
 
@@ -112,31 +185,14 @@ A renderer is **NexArt Protocol Compliant** if:
 3. Produces byte-identical outputs for identical inputs
 4. Does not introduce alternative execution paths or fallbacks
 
-Implementations that fail any condition are non-compliant.
-
-## Forking Policy
-
-Forks are permitted under the license terms.
-
-Forks are **not** NexArt Protocol Compliant by default. Compliance requires adherence to all conditions above. Modified forks that relax constraints or diverge from SDK semantics cannot produce valid on-chain attestations.
-
-## Public Availability
-
-This repository is public to enable:
-
-- Transparency in protocol execution
-- Independent verification of canonical outputs
-- Third-party platform integration
-- Community review of the reference implementation
-
-Public availability does not imply that forks inherit compliance status.
+Forks are **not** compliant by default.
 
 ## Version Information
 
 | Component | Version |
 |-----------|---------|
-| Node | 1.0.0 |
-| SDK | 1.6.0 |
+| Service | 0.1.0 |
+| SDK | 1.6.0 (exact pin) |
 | Protocol | 1.2.0 |
 
 ## Deployment
@@ -145,10 +201,17 @@ Public availability does not imply that forks inherit compliance status.
 # Development
 npm run dev
 
-# Production
+# Production (Docker)
 docker build -t nexart-canonical .
-docker run -p 5000:5000 nexart-canonical
+docker run -p 5000:5000 -e GIT_SHA=$(git rev-parse --short HEAD) nexart-canonical
+
+# Production (Railway)
+# GIT_SHA is auto-set via RAILWAY_GIT_COMMIT_SHA
 ```
+
+## Documentation
+
+- [Architecture: Core vs Edges](docs/architecture.md)
 
 ## License
 

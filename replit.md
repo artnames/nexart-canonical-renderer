@@ -60,6 +60,7 @@ The SDK is imported via `createRequire()` workaround due to ESM compatibility is
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Node status with version info |
+| `/version` | GET | Full version info (SDK, protocol, build) |
 | `/render` | POST | Execute snapshot (static or loop) |
 | `/verify` | POST | Verify execution against expected hash |
 

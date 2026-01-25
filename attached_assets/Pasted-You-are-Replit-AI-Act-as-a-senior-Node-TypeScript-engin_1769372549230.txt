@@ -1,0 +1,102 @@
+You are Replit AI. Act as a senior Node/TypeScript engineer + documentation-focused maintainer.
+
+Repo to work on
+- The separate public Node backend repo (the “node” repo) for NexArt.
+- This repo runs the NexArt CodeMode SDK directly (as a dependency), not a fork. Your job is to make that fact explicit and auditable.
+
+Task: Implement ITEM 3 ONLY
+ITEM 3 = Update Node documentation + version clarity so it’s clear, reproducible, and enterprise-auditable.
+Do NOT implement reliability/backups (that is item 4).
+Do NOT implement CLI or SDK changes (that is items 0–2).
+You may add tiny helper code ONLY if required to expose version info cleanly.
+
+Hard rules
+- Do not change protocol semantics.
+- Do not introduce breaking API changes unless unavoidable.
+- No telemetry.
+- Keep the node repo open-source; monetization is via hosted deployment (API keys/quotas) later.
+
+========================
+ITEM 3 DELIVERABLES
+========================
+
+A) Documentation: Make the Node repo purpose crystal clear
+1) Update README.md with these sections (keep it crisp):
+   - What this server is:
+     * Hosted verification / attestation / replay services built on NexArt CodeMode SDK
+   - What this server is NOT:
+     * Not required for local deterministic execution
+     * Not a replacement for the SDK/CLI
+   - Core vs Edges:
+     * SDK + CLI = free core
+     * Node-hosted service = paid edge when operated by NexArt (accounts/quotas/SLAs)
+     * Anyone can self-host, but “NexArt Attested” refers to NexArt-hosted signature
+   - Quickstart (dev):
+     * How to install deps, set env vars, run locally
+   - Versioning & Reproducibility (IMPORTANT):
+     * How the server pins @nexart/codemode-sdk
+     * How to determine which SDK/protocol/runtime version verified a result
+     * Commitment: the server returns explicit version info for each verification/attestation
+
+2) Add docs/architecture.md (or docs/core-vs-edges.md in this repo) with:
+   - Diagram-like explanation:
+     * SDK/CLI local flow
+     * Node hosted edge flow
+   - What is signed, what is verified
+   - Definitions:
+     * “NexArt Attested” vs “Self Attested”
+
+B) Version clarity: Pin and expose SDK/protocol/runtime versions
+1) Inspect how the repo currently depends on @nexart/codemode-sdk:
+   - package.json dependency range (^, ~, exact, git hash)
+   - If it’s a loose range (like ^1.x), change it to an EXACT pin:
+     "@nexart/codemode-sdk": "X.Y.Z"
+   - If it uses a git ref, ensure it is pinned to a specific commit.
+   - Document the choice in README.
+
+2) Add a small module to expose version data:
+   - Create `src/version.ts` (or similar) that exports:
+     - sdkVersion (from package.json dependency or from the SDK if it exposes version)
+     - protocolVersion (from the SDK constant if available, otherwise from a config/env value)
+     - runtimeHash or buildId (if available; otherwise set to the node build git SHA via env var like GIT_SHA)
+   - If the SDK exports protocol version/runtime hash, use those. Do not invent.
+
+3) Add a new endpoint (or extend an existing one) to make version visibility explicit:
+   - GET /version
+     returns:
+     {
+       service: "nexart-node",
+       sdkVersion,
+       protocolVersion,
+       runtimeHash,
+       serviceBuild: GIT_SHA (if available)
+     }
+
+4) Ensure any existing verification/attestation endpoint responses include version fields:
+   - For each response that claims “verified/attested”, include:
+     - sdkVersion
+     - protocolVersion
+     - runtimeHash/serviceBuild
+   - If endpoints don’t exist yet, just implement /version and update docs (do not create new product endpoints).
+
+C) Reproducibility notes for users
+In README, add a short “Reproduce locally” section that states:
+- If you have a snapshot created by the CLI, you can replay/verify offline.
+- Node server is optional; it provides hosted third-party trust when run by NexArt.
+
+========================
+OUTPUT REQUIREMENTS
+========================
+1) Start by printing:
+   - repo tree
+   - current package.json dependencies (focus on @nexart/codemode-sdk)
+   - current README license/version claims
+2) Provide a short plan (bullets).
+3) Apply changes:
+   - README updates
+   - add docs file(s)
+   - pin dependency (if needed)
+   - add /version endpoint + version module
+4) Provide exact commands to run locally and test /version.
+
+Proceed now. Do not ask questions unless truly blocked; make reasonable assumptions and implement item 3 only.

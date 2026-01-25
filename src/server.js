@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
+import { getVersionInfo } from "./version.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -140,6 +141,20 @@ app.get("/health", (req, res) => {
     sdk_version: SDK_VERSION,
     protocol_version: PROTOCOL_VERSION,
     canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/version", (req, res) => {
+  const versionInfo = getVersionInfo();
+  res.json({
+    service: versionInfo.service,
+    serviceVersion: versionInfo.serviceVersion,
+    sdkVersion: versionInfo.sdkVersion,
+    sdkDependency: versionInfo.sdkDependency,
+    protocolVersion: versionInfo.protocolVersion,
+    serviceBuild: versionInfo.serviceBuild,
+    nodeVersion: versionInfo.nodeVersion,
     timestamp: new Date().toISOString(),
   });
 });
@@ -469,13 +484,14 @@ app.listen(PORT, "0.0.0.0", () => {
 ║  Canvas: ${CANVAS_WIDTH}×${CANVAS_HEIGHT} (hard-locked)                                         ║
 ║                                                                              ║
 ║  Modes:                                                                      ║
-║    Static: setup() only → PNG                                                ║
+║    Static: setup() + draw() once → PNG                                       ║
 ║    Loop:   setup() + draw() × N → MP4 video                                  ║
 ║                                                                              ║
 ║  Endpoints:                                                                  ║
-║    GET  /health  - Node status                                               ║
-║    POST /render  - Execute snapshot (static or loop)                         ║
-║    POST /verify  - Verify execution against expected hash                    ║
+║    GET  /health   - Node status                                              ║
+║    GET  /version  - Full version info (SDK, protocol, build)                 ║
+║    POST /render   - Execute snapshot (static or loop)                        ║
+║    POST /verify   - Verify execution against expected hash                   ║
 ║                                                                              ║
 ║  Running on port ${PORT}                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
