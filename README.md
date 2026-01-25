@@ -125,9 +125,11 @@ The Node server is optional; it provides hosted third-party trust when run by Ne
 |----------|--------|-------------|
 | `/health` | GET | Node status |
 | `/version` | GET | Full version info (SDK, protocol, build) |
-| `/render` | POST | Execute snapshot, return output + hash |
-| `/api/render` | POST | CLI contract - static render (code, seed, VAR) |
+| `/render` | POST | Dev only - disabled in production (410 Gone) |
+| `/api/render` | POST | **Metered endpoint** - CLI contract with API key auth |
 | `/verify` | POST | Re-execute, compare against expected hash |
+
+> **Note:** `/api/render` is the only metered render endpoint. Use it with `Authorization: Bearer <api_key>`. The legacy `/render` endpoint returns 410 Gone in production.
 
 ### GET /version
 

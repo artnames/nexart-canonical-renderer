@@ -252,6 +252,13 @@ function detectLoopMode(code, execution) {
 }
 
 app.post("/render", async (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(410).json({
+      error: "GONE",
+      message: "Use /api/render with API key authentication. This endpoint is disabled in production."
+    });
+  }
+
   const startTime = Date.now();
 
   try {
