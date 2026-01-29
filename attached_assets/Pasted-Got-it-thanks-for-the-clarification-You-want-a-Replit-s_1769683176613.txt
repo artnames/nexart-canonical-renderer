@@ -1,0 +1,116 @@
+Got it — thanks for the clarification 👍
+You want a Replit-style engineering prompt that tells the agent exactly what to update in the repo (README, docs, examples) after the lenient protocolVersion defaulting change.
+
+Below is a clean, copy-pasteable Replit prompt written the way Replit agents actually work best: scoped, explicit, non-hand-wavy, and aligned with how you’ve built NexArt.
+
+⸻
+
+✅ Replit Prompt — Update Public Docs After Lenient protocolVersion Change
+
+Context
+The NexArt Canonical Renderer has been updated to support lenient defaulting of protocolVersion when omitted.
+
+Behavior is now:
+	•	protocolVersion optional
+	•	If omitted → defaults to current canonical version
+	•	If provided → must match a supported version or request fails
+	•	Response always includes resolved version in headers
+	•	Defaulted executions are explicitly marked and logged
+
+The implementation is already done in code.
+Your task is documentation-only: update all relevant public-facing docs in this repository so behavior is accurate, explicit, and auditable.
+
+⸻
+
+🎯 Your task
+
+Update documentation files only.
+Do not change runtime behavior, database schema, or APIs.
+
+⸻
+
+📂 Files to update
+	1.	README.md
+	•	Add a section:
+
+## Protocol Version Handling
+
+
+	•	Explain:
+	•	protocolVersion is optional but recommended
+	•	Missing → canonical default
+	•	Invalid → hard failure
+	•	Include example curl with and without protocolVersion
+	•	Mention headers:
+	•	X-Protocol-Version
+	•	X-Protocol-Defaulted
+
+	2.	docs/ or docs/protocol.md (if present)
+	•	Add subsection:
+
+### Protocol Version Resolution
+
+
+	•	Clearly describe:
+	•	Explicit version pinning
+	•	Defaulted resolution
+	•	Audit visibility
+	•	Include a short truth table
+
+	3.	CLI documentation (README or /docs/cli.md)
+	•	State explicitly:
+	•	CLI always injects protocolVersion
+	•	CLI users never rely on defaulting
+	•	Add note:
+“Defaulting exists for API and integration safety, not CLI usage.”
+	4.	Examples
+	•	Ensure at least one example includes protocolVersion
+	•	If any example omits it, add a comment explaining defaulting
+	5.	Changelog or release notes (if present)
+	•	Add entry:
+
+Added: Lenient protocolVersion defaulting with explicit audit marking
+
+
+
+⸻
+
+🧠 Language & constraints
+	•	Use precise, technical language
+	•	Avoid words like “fallback” or “silent”
+	•	Emphasize:
+	•	determinism
+	•	auditability
+	•	explicit resolution
+	•	Do NOT remove strict validation for invalid versions
+
+⸻
+
+📌 Required sentence (include verbatim)
+
+“If protocolVersion is omitted, the renderer resolves it to the current canonical protocol version and records that resolution as part of the execution proof.”
+
+⸻
+
+✅ Acceptance criteria
+	•	Docs match current runtime behavior exactly
+	•	Defaulting behavior is discoverable and unambiguous
+	•	CLI behavior is clearly differentiated from API behavior
+	•	No contradictions across files
+
+⸻
+
+🚫 Do not
+	•	Change code
+	•	Add new features
+	•	Rename headers
+	•	Reword protocol semantics
+
+⸻
+
+If you want, next I can give you:
+	•	A second Replit prompt to add a tiny /version and /api/render doc test block
+	•	Or a pre-launch doc audit checklist (what an enterprise reviewer will look for)
+	•	Or a one-page spec excerpt you can link from the README
+
+You’re extremely close to “this feels inevitable” territory.

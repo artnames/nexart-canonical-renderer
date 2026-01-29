@@ -144,3 +144,48 @@ This enables consumers to:
 - Verify which SDK produced a result
 - Reproduce results locally with matching versions
 - Audit the exact code that ran
+
+## Protocol Version Resolution
+
+The renderer implements lenient protocol version defaulting with explicit auditability.
+
+**If `protocolVersion` is omitted, the renderer resolves it to the current canonical protocol version and records that resolution as part of the execution proof.**
+
+### Resolution Rules
+
+| Input | Resolution | Audit Marker |
+|-------|------------|--------------|
+| `protocolVersion` omitted | Server default (env `PROTOCOL_VERSION` or `1.2.0`) | `protocol_defaulted: true` |
+| `protocolVersion` valid | Use provided version | `protocol_defaulted: false` |
+| `protocolVersion` invalid | Hard failure (400) | Error logged |
+
+### Explicit Version Pinning
+
+For deterministic, reproducible executions:
+- **CLI users**: Always pin version explicitly (CLI injects `protocolVersion` automatically)
+- **API integrations**: Should include `protocolVersion` when determinism is required
+
+### Defaulted Resolution
+
+When `protocolVersion` is omitted:
+- The server resolves to `DEFAULT_PROTOCOL_VERSION` (configurable via environment)
+- Response includes `X-Protocol-Defaulted: true` header
+- JSON response includes `protocolVersionSource: "defaulted"`
+- Usage logs record `protocol_defaulted = true`
+
+This approach ensures:
+1. **Backward compatibility** — Older clients work without modification
+2. **Integration safety** — No hard failures during SDK upgrades
+3. **Auditability** — All defaulted executions are explicitly marked
+
+### Audit Visibility
+
+Every execution records:
+- `protocol_version`: The resolved version used
+- `protocol_defaulted`: Boolean indicating if defaulting occurred
+- Response headers: `X-Protocol-Version`, optionally `X-Protocol-Defaulted`
+
+This enables operators to:
+- Identify clients not explicitly pinning versions
+- Track protocol adoption across integrations
+- Audit determinism guarantees for minted artworks

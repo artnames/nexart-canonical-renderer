@@ -113,6 +113,80 @@ The Node server is optional; it provides hosted third-party trust when run by Ne
 - **Hashing**: SHA-256 of raw output bytes
 - **SDK**: All random/noise operations via `@nexart/codemode-sdk`
 
+## Protocol Version Handling
+
+The renderer supports explicit protocol version pinning with lenient defaulting for integration safety.
+
+**If `protocolVersion` is omitted, the renderer resolves it to the current canonical protocol version and records that resolution as part of the execution proof.**
+
+### Resolution Behavior
+
+| Request `protocolVersion` | Resolution | Headers | Audit |
+|---------------------------|------------|---------|-------|
+| Omitted | Default (currently `1.2.0`) | `X-Protocol-Version: 1.2.0`, `X-Protocol-Defaulted: true` | Recorded as defaulted |
+| `"1.2.0"` (valid) | Use provided | `X-Protocol-Version: 1.2.0` | Recorded as explicit |
+| `"9.9.9"` (invalid) | Hard failure | 400 error | Logged as validation error |
+
+### Response Headers
+
+- `X-Protocol-Version`: The resolved protocol version used for execution (always present)
+- `X-Protocol-Defaulted: true`: Present only when version was resolved from server default
+
+### JSON Response
+
+When requesting JSON output, the response includes:
+
+```json
+{
+  "protocolVersion": "1.2.0",
+  "protocolVersionSource": "defaulted"
+}
+```
+
+The `protocolVersionSource` field is:
+- `"request"` — version was explicitly provided in the request
+- `"defaulted"` — version was resolved from server default
+
+### Examples
+
+```bash
+# Without protocolVersion (defaulted)
+curl -D - -X POST http://localhost:5000/api/render \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "function setup() { background(100); }"}' \
+  -o /dev/null 2>&1 | grep -i "x-protocol"
+# X-Protocol-Version: 1.2.0
+# X-Protocol-Defaulted: true
+
+# With explicit protocolVersion
+curl -D - -X POST http://localhost:5000/api/render \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "function setup() { background(100); }", "protocolVersion": "1.2.0"}' \
+  -o /dev/null 2>&1 | grep -i "x-protocol"
+# X-Protocol-Version: 1.2.0
+# (no X-Protocol-Defaulted header)
+
+# With invalid protocolVersion (hard failure)
+curl -X POST http://localhost:5000/api/render \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "function setup() { background(100); }", "protocolVersion": "9.9.9"}'
+# {"error":"PROTOCOL_VIOLATION","message":"Unsupported protocol version: 9.9.9. Supported: 1.0.0, 1.1.0, 1.2.0"}
+```
+
+### CLI vs API Behavior
+
+The `nexart-cli` always injects an explicit `protocolVersion` into requests. CLI users never rely on defaulting behavior.
+
+Defaulting exists for:
+- API integrations that may not track protocol versions
+- Backward compatibility with older clients
+- Integration safety during SDK upgrades
+
+All defaulted executions are explicitly marked and logged for auditability.
+
 ## Execution Modes
 
 **Static**: Executes `setup()` + `draw()` once, returns PNG.
@@ -266,43 +340,6 @@ echo "Key Hash: $KEY_HASH"
 ```sql
 INSERT INTO api_keys (key_hash, label, plan, status, monthly_limit)
 VALUES ('YOUR_KEY_HASH', 'My App', 'free', 'active', 1000);
-```
-
-### Protocol Version Defaulting
-
-The `/api/render` endpoint uses **lenient protocol version defaulting**:
-
-- If `protocolVersion` is **missing** from request: uses server default (currently `1.2.0`), returns `X-Protocol-Defaulted: true` header
-- If `protocolVersion` is **provided and supported**: uses that version, no defaulted header
-- If `protocolVersion` is **provided but unsupported**: returns 400 error
-
-**Response headers:**
-- `X-Protocol-Version`: The resolved protocol version used (always present)
-- `X-Protocol-Defaulted: true`: Only present when version was defaulted
-
-**JSON response includes:**
-```json
-{
-  "protocolVersion": "1.2.0",
-  "protocolVersionSource": "defaulted"  // or "request"
-}
-```
-
-**Test examples:**
-```bash
-# Without protocolVersion (expect X-Protocol-Defaulted: true)
-curl -D - -X POST http://localhost:5000/api/render \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"code": "function setup() { background(100); }"}' \
-  -o /dev/null 2>&1 | grep -i protocol
-
-# With protocolVersion (no defaulted header)
-curl -D - -X POST http://localhost:5000/api/render \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"code": "function setup() { background(100); }", "protocolVersion": "1.2.0"}' \
-  -o /dev/null 2>&1 | grep -i protocol
 ```
 
 ### Usage Logging
