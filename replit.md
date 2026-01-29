@@ -212,16 +212,29 @@ Content-Type: application/json
 - Protocol Version: 1.2.0
 - Node Version: 1.0.0
 
-## Authentication & Metering (Phase 1)
+## Authentication & Metering
 
 ### Environment Variables
 - `DATABASE_URL`: PostgreSQL connection string (auto-configured in Replit)
 - `ADMIN_SECRET`: Secret for admin endpoints
+- `METERING_REQUIRED`: If `false`, allows renders when DB unavailable
 
 ### API Key Auth
 - `/api/render` requires `Authorization: Bearer <api_key>`
 - Keys are SHA-256 hashed and stored in `api_keys` table
 - Usage is logged to `usage_events` table
+
+### Account-Level Quota Enforcement
+- Quota is enforced per account (`user_id`), not per API key
+- All API keys for same user share the monthly quota
+- `accounts.monthly_limit` controls quota (default: 100)
+- Successful renders (2xx on `/api/render`) count toward quota
+- When exceeded: 429 response with `X-Quota-*` headers
+
+### Response Headers
+- `X-Quota-Limit`: Account's monthly limit
+- `X-Quota-Used`: Renders used this month
+- `X-Quota-Remaining`: Renders remaining
 
 ### Admin Endpoints
 - `GET /admin/usage/today` - Today's usage (requires ADMIN_SECRET)

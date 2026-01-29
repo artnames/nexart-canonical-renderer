@@ -1,0 +1,41 @@
+Goal: Enforce account-level monthly quota in the canonical renderer /api/render.
+
+Current state:
+- usage_events logs correctly
+- accounts table exists in Railway Postgres with (user_id PK, plan, monthly_limit, created_at, updated_at)
+- api_keys.user_id references accounts.user_id (FK now exists)
+- account-plan + dashboard show limits, but /api/render does not enforce quota (free user can exceed 100/month)
+
+Implement:
+1) In /api/render request flow, after API key auth resolves api_key_id and user_id, enforce account-level quota:
+   - monthly_limit = accounts.monthly_limit for user_id, fallback to default 100 if no row (or table missing)
+   - renders_this_month = count of successful certified renders for that user_id across ALL keys:
+       status_code between 200 and 299
+       endpoint = '/api/render'
+       ts >= date_trunc('month', now())
+   - if renders_this_month >= monthly_limit:
+       return 429 with JSON:
+         { error: "QUOTA_EXCEEDED", message: "Monthly certified run quota exceeded", limit, used, resetAt }
+       set header: X-Quota-Limit, X-Quota-Used, X-Quota-Remaining (0)
+       still log a usage_events row with status_code=429, duration_ms, endpoint='/api/render', error='QUOTA_EXCEEDED'
+       (do NOT attempt rendering)
+
+2) On successful renders, include headers:
+   X-Quota-Limit, X-Quota-Used, X-Quota-Remaining
+   (Used = renders_this_month + 1 after logging)
+
+3) Ensure counting is safe under concurrency:
+   - Use a single transaction if possible; otherwise accept slight race but never allow huge overages.
+   - If easy: do “count then block” before render, and “log success” after render. That’s acceptable now.
+
+4) Add an admin-friendly note in README + Acceptance checklist section:
+   - Explain quota is enforced per account (user_id), not per key
+   - Provide curl test:
+     - set monthly_limit=2 for a test user and confirm 3rd request returns 429
+
+5) Add a migration if needed (only if your DB schema requires new columns; otherwise no migration).
+
+Return:
+- exact file diffs
+- updated README snippets
+- the exact curl commands to test QUOTA_EXCEEDED quickly

@@ -5,7 +5,7 @@ import crypto from "crypto";
 import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
-import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth } from "./db.js";
+import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate } from "./db.js";
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
   createP5Runtime,
@@ -176,6 +176,31 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     const resolvedProtocolVersion = requestedProtocolVersion ?? DEFAULT_PROTOCOL_VERSION;
     const protocolVersionWasDefaulted = !requestedProtocolVersion;
 
+    // ========== Account-Level Quota Enforcement ==========
+    const userId = req.apiKey?.userId;
+    const quota = await getAccountQuota(userId);
+
+    if (quota.exceeded) {
+      const resetAt = await getQuotaResetDate();
+      res.set("X-Quota-Limit", String(quota.limit));
+      res.set("X-Quota-Used", String(quota.used));
+      res.set("X-Quota-Remaining", "0");
+      res.set("X-Protocol-Version", resolvedProtocolVersion);
+      if (protocolVersionWasDefaulted) {
+        res.set("X-Protocol-Defaulted", "true");
+      }
+
+      logUsage(req, res.status(429), null, "QUOTA_EXCEEDED", resolvedProtocolVersion, protocolVersionWasDefaulted);
+      return res.json({
+        error: "QUOTA_EXCEEDED",
+        message: "Monthly certified run quota exceeded",
+        limit: quota.limit,
+        used: quota.used,
+        resetAt
+      });
+    }
+    // ====================================================
+
     // Validate protocol version if explicitly provided
     if (requestedProtocolVersion && !SUPPORTED_PROTOCOL_VERSIONS.includes(requestedProtocolVersion)) {
       logUsage(req, res.status(400), null, "unsupported_protocol_version", resolvedProtocolVersion, protocolVersionWasDefaulted);
@@ -228,6 +253,10 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     if (protocolVersionWasDefaulted) {
       res.set("X-Protocol-Defaulted", "true");
     }
+    // Quota headers (used + 1 since this render will be logged as success)
+    res.set("X-Quota-Limit", String(quota.limit));
+    res.set("X-Quota-Used", String(quota.used + 1));
+    res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining - 1)));
     // ======================================
 
     const acceptHeader = req.get("Accept") || "";

@@ -342,6 +342,51 @@ INSERT INTO api_keys (key_hash, label, plan, status, monthly_limit)
 VALUES ('YOUR_KEY_HASH', 'My App', 'free', 'active', 1000);
 ```
 
+### Account-Level Quota Enforcement
+
+Quota is enforced **per account (user_id)**, not per API key. All API keys linked to the same account share the monthly quota.
+
+**How it works:**
+- Each account has a `monthly_limit` in the `accounts` table (default: 100)
+- Usage is counted across **all API keys** for that user_id
+- Only successful renders (status 200-299 on `/api/render`) count toward quota
+- Quota resets on the 1st of each month (UTC)
+
+**Quota headers (present on all `/api/render` responses):**
+- `X-Quota-Limit`: Account's monthly limit
+- `X-Quota-Used`: Renders used this month (after current request)
+- `X-Quota-Remaining`: Renders remaining
+
+**When quota is exceeded (429 response):**
+```json
+{
+  "error": "QUOTA_EXCEEDED",
+  "message": "Monthly certified run quota exceeded",
+  "limit": 100,
+  "used": 100,
+  "resetAt": "2026-02-01T00:00:00.000Z"
+}
+```
+
+**Testing quota enforcement:**
+```bash
+# 1. Create a test account with low limit
+psql $DATABASE_URL -c "INSERT INTO accounts (user_id, plan, monthly_limit) VALUES ('test-user', 'free', 2) ON CONFLICT (user_id) DO UPDATE SET monthly_limit = 2;"
+
+# 2. Link your API key to this account
+psql $DATABASE_URL -c "UPDATE api_keys SET user_id = 'test-user' WHERE label = 'Test Key';"
+
+# 3. Make 3 requests - the 3rd should return 429
+for i in 1 2 3; do
+  echo "Request $i:"
+  curl -s -D - -X POST http://localhost:5000/api/render \
+    -H "Authorization: Bearer YOUR_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"code": "function setup() { background(100); }"}' \
+    -o /dev/null 2>&1 | grep -E "(HTTP|X-Quota)"
+done
+```
+
 ### Usage Logging
 
 Every `/api/render` request is logged to `usage_events`:
@@ -350,7 +395,7 @@ Every `/api/render` request is logged to `usage_events`:
 - `width`, `height`, `sdk_version`, `protocol_version`
 - `protocol_defaulted`: Boolean indicating if version was defaulted
 - `runtime_hash`, `output_hash_prefix`
-- `error`: Error message if any
+- `error`: Error message if any (including `QUOTA_EXCEEDED` for 429 responses)
 
 ### Admin Endpoints
 

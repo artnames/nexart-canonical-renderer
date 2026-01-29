@@ -1,0 +1,19 @@
+                                        Table "public.api_keys"
+    Column     |           Type           | Collation | Nullable |               Default                
+---------------+--------------------------+-----------+----------+--------------------------------------
+ id            | integer                  |           | not null | nextval('api_keys_id_seq'::regclass)
+ key_hash      | character varying(64)    |           | not null | 
+ label         | character varying(255)   |           | not null | 
+ plan          | character varying(50)    |           | not null | 'free'::character varying
+ status        | character varying(20)    |           | not null | 'active'::character varying
+ monthly_limit | integer                  |           |          | 1000
+ created_at    | timestamp with time zone |           |          | now()
+ user_id       | uuid                     |           |          | 
+Indexes:
+    "api_keys_pkey" PRIMARY KEY, btree (id)
+    "api_keys_key_hash_key" UNIQUE CONSTRAINT, btree (key_hash)
+    "idx_api_keys_key_hash" btree (key_hash)
+    "idx_api_keys_status" btree (status)
+Referenced by:
+    TABLE "usage_events" CONSTRAINT "usage_events_api_key_id_fkey" FOREIGN KEY (api_key_id) REFERENCES api_keys(id)
+

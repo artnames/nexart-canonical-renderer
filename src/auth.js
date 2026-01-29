@@ -68,7 +68,8 @@ export function createAuthMiddleware() {
       id: validation.keyId,
       label: validation.label,
       plan: validation.plan,
-      monthlyLimit: validation.monthlyLimit
+      monthlyLimit: validation.monthlyLimit,
+      userId: validation.userId
     };
     req.startTime = startTime;
 

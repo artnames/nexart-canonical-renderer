@@ -66,7 +66,7 @@ export async function validateApiKey(apiKey) {
   try {
     const keyHash = hashApiKey(apiKey);
     const result = await db.query(
-      `SELECT id, label, plan, status, monthly_limit 
+      `SELECT id, label, plan, status, monthly_limit, user_id 
        FROM api_keys 
        WHERE key_hash = $1`,
       [keyHash]
@@ -86,12 +86,63 @@ export async function validateApiKey(apiKey) {
       keyId: key.id, 
       label: key.label, 
       plan: key.plan,
-      monthlyLimit: key.monthly_limit 
+      monthlyLimit: key.monthly_limit,
+      userId: key.user_id
     };
   } catch (error) {
     console.error("[DB] API key validation error:", error.message);
     return { valid: false, reason: "database_error" };
   }
+}
+
+const DEFAULT_MONTHLY_LIMIT = 100;
+
+export async function getAccountQuota(userId) {
+  const db = getPool();
+  if (!db) return { limit: DEFAULT_MONTHLY_LIMIT, used: 0, available: true };
+
+  try {
+    let monthlyLimit = DEFAULT_MONTHLY_LIMIT;
+
+    if (userId) {
+      const accountResult = await db.query(
+        `SELECT monthly_limit FROM accounts WHERE user_id = $1`,
+        [userId]
+      );
+      if (accountResult.rows.length > 0) {
+        monthlyLimit = accountResult.rows[0].monthly_limit;
+      }
+    }
+
+    const usageResult = await db.query(
+      `SELECT COUNT(*) as count
+       FROM usage_events ue
+       JOIN api_keys ak ON ue.api_key_id = ak.id
+       WHERE ak.user_id = $1
+         AND ue.endpoint = '/api/render'
+         AND ue.status_code >= 200 AND ue.status_code < 300
+         AND ue.ts >= DATE_TRUNC('month', NOW())`,
+      [userId]
+    );
+
+    const used = parseInt(usageResult.rows[0]?.count || 0, 10);
+
+    return {
+      limit: monthlyLimit,
+      used,
+      remaining: Math.max(0, monthlyLimit - used),
+      exceeded: used >= monthlyLimit
+    };
+  } catch (error) {
+    console.error("[DB] Quota check error:", error.message);
+    return { limit: DEFAULT_MONTHLY_LIMIT, used: 0, remaining: DEFAULT_MONTHLY_LIMIT, exceeded: false };
+  }
+}
+
+export async function getQuotaResetDate() {
+  const now = new Date();
+  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  return nextMonth.toISOString();
 }
 
 export async function logUsageEvent(event) {
