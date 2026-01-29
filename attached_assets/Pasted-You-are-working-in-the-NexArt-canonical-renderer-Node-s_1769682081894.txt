@@ -1,0 +1,49 @@
+You are working in the NexArt canonical renderer Node service (Express). Implement “Lenient protocolVersion defaulting” with explicit auditability.
+
+Current behavior:
+- /api/render returns PNG and already sets x-protocol-version header.
+- usage_events already stores protocol_version.
+- If protocolVersion is missing in request body, the renderer currently still succeeds (200 PNG). We want to KEEP that lenient behavior, but make it explicit and recorded.
+
+Required changes (no breaking changes):
+1) Define a single source of truth for the server default protocol version:
+   - DEFAULT_PROTOCOL_VERSION = process.env.PROTOCOL_VERSION ?? "1.2.0"
+   - Ensure /version returns protocolVersion as that default.
+
+2) Request normalization:
+   - In the /api/render handler, normalize protocolVersion:
+       const requested = body.protocolVersion
+       const resolved = requested ?? DEFAULT_PROTOCOL_VERSION
+       const wasDefaulted = !requested
+   - Use `resolved` for all protocol checks and any internal SDK calls.
+   - Continue enforcing canonical canvas rules as today.
+
+3) Response headers:
+   - Always return `x-protocol-version: <resolved>`
+   - If defaulted, also return `x-protocol-defaulted: true` (string "true").
+   - If provided, omit x-protocol-defaulted or set it to "false" (either is fine, but be consistent).
+
+4) usage_events logging:
+   - Ensure the row written to usage_events uses protocol_version = resolved
+   - Additionally write a boolean-like marker (if schema supports it) OR encode it in `error` field only when needed.
+   - Prefer: add a nullable column `protocol_defaulted boolean` ONLY if migrations are easy here. If not, skip schema change and just rely on headers + snapshots.
+
+5) Snapshot behavior:
+   - If the service produces any snapshot JSON (or passes data to SDK that creates snapshots), ensure snapshot includes:
+       protocolVersion: resolved
+       protocolVersionSource: "request" | "defaulted"
+     where "defaulted" is used when protocolVersion was missing.
+   - If node does NOT generate snapshots and only returns PNG, then do NOT invent snapshots here. Just ensure headers + usage_events are correct. (But confirm in code whether the node writes any snapshot metadata.)
+
+6) Update validation behavior:
+   - Remove/avoid any hard “protocolVersion required” validation that causes 400 when missing.
+   - Still reject unknown protocol versions if provided and not supported.
+
+7) Add a tiny test/fixture:
+   - Add a curl example to repo docs or a small test script:
+     - POST without protocolVersion -> expect 200 image/png AND header x-protocol-defaulted: true
+     - POST with protocolVersion "1.2.0" -> expect 200 AND no defaulted header (or false)
+
+Deliverable:
+- A commit that implements the above, with code comments showing where normalization happens.
+- Do NOT change protocol enforcement rules besides the “missing protocolVersion” leniency + explicit defaulting.

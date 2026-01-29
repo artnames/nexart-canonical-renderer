@@ -35,10 +35,16 @@ const CANVAS_WIDTH = 1950;
 const CANVAS_HEIGHT = 2400;
 const NODE_VERSION = "1.0.0";
 const SDK_VERSION = SDK_VERSION_FROM_SDK || "1.8.4";
-const PROTOCOL_VERSION = CODE_MODE_PROTOCOL_VERSION || "1.0.0";
+
+// Single source of truth for default protocol version
+// Can be overridden via env var, falls back to SDK constant or hardcoded default
+const DEFAULT_PROTOCOL_VERSION = process.env.PROTOCOL_VERSION ?? CODE_MODE_PROTOCOL_VERSION ?? "1.2.0";
+
+// Supported protocol versions (for validation when provided)
+const SUPPORTED_PROTOCOL_VERSIONS = ["1.0.0", "1.1.0", "1.2.0"];
 
 const apiKeyAuth = createAuthMiddleware();
-const logUsage = createUsageLogger(SDK_VERSION, PROTOCOL_VERSION, CANVAS_WIDTH, CANVAS_HEIGHT);
+const logUsage = createUsageLogger(SDK_VERSION, DEFAULT_PROTOCOL_VERSION, CANVAS_WIDTH, CANVAS_HEIGHT);
 
 function computeHash(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
@@ -137,7 +143,7 @@ app.get("/health", (req, res) => {
     node: "nexart-canonical",
     version: NODE_VERSION,
     sdk_version: SDK_VERSION,
-    protocol_version: PROTOCOL_VERSION,
+    protocol_version: DEFAULT_PROTOCOL_VERSION,
     canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
     timestamp: new Date().toISOString(),
   });
@@ -150,7 +156,8 @@ app.get("/version", (req, res) => {
     serviceVersion: versionInfo.serviceVersion,
     sdkVersion: versionInfo.sdkVersion,
     sdkDependency: versionInfo.sdkDependency,
-    protocolVersion: versionInfo.protocolVersion,
+    // Use server's default protocol version as the authoritative source
+    protocolVersion: DEFAULT_PROTOCOL_VERSION,
     serviceBuild: versionInfo.serviceBuild,
     nodeVersion: versionInfo.nodeVersion,
     timestamp: new Date().toISOString(),
@@ -162,10 +169,25 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
   let runtimeHash = null;
 
   try {
-    const { code, seed, VAR, width, height, protocolVersion: reqProtocolVersion } = req.body;
+    const { code, seed, VAR, width, height, protocolVersion: requestedProtocolVersion } = req.body;
+
+    // ========== Protocol Version Normalization ==========
+    // Lenient defaulting: if protocolVersion missing, use server default
+    const resolvedProtocolVersion = requestedProtocolVersion ?? DEFAULT_PROTOCOL_VERSION;
+    const protocolVersionWasDefaulted = !requestedProtocolVersion;
+
+    // Validate protocol version if explicitly provided
+    if (requestedProtocolVersion && !SUPPORTED_PROTOCOL_VERSIONS.includes(requestedProtocolVersion)) {
+      logUsage(req, res.status(400), null, "unsupported_protocol_version", resolvedProtocolVersion, protocolVersionWasDefaulted);
+      return res.json({
+        error: "PROTOCOL_VIOLATION",
+        message: `Unsupported protocol version: ${requestedProtocolVersion}. Supported: ${SUPPORTED_PROTOCOL_VERSIONS.join(", ")}`,
+      });
+    }
+    // ====================================================
 
     if (!code || typeof code !== "string") {
-      logUsage(req, res.status(400), null, "code_required");
+      logUsage(req, res.status(400), null, "code_required", resolvedProtocolVersion, protocolVersionWasDefaulted);
       return res.json({
         error: "INVALID_REQUEST",
         message: "code is required and must be a string",
@@ -173,7 +195,7 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     }
 
     if (width && width !== CANVAS_WIDTH) {
-      logUsage(req, res.status(400), null, "invalid_width");
+      logUsage(req, res.status(400), null, "invalid_width", resolvedProtocolVersion, protocolVersionWasDefaulted);
       return res.json({
         error: "PROTOCOL_VIOLATION",
         message: `Canvas width must be ${CANVAS_WIDTH}, got ${width}`,
@@ -181,7 +203,7 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     }
 
     if (height && height !== CANVAS_HEIGHT) {
-      logUsage(req, res.status(400), null, "invalid_height");
+      logUsage(req, res.status(400), null, "invalid_height", resolvedProtocolVersion, protocolVersionWasDefaulted);
       return res.json({
         error: "PROTOCOL_VIOLATION",
         message: `Canvas height must be ${CANVAS_HEIGHT}, got ${height}`,
@@ -196,9 +218,17 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     const pngBuffer = canvas.toBuffer("image/png");
     runtimeHash = computeHash(pngBuffer);
 
+    // ========== Response Headers ==========
     if (req.meteringSkipped) {
       res.set("X-NexArt-Metering", "skipped");
     }
+    // Always set resolved protocol version
+    res.set("X-Protocol-Version", resolvedProtocolVersion);
+    // Set defaulted flag header when protocol version was not provided
+    if (protocolVersionWasDefaulted) {
+      res.set("X-Protocol-Defaulted", "true");
+    }
+    // ======================================
 
     const acceptHeader = req.get("Accept") || "";
     if (acceptHeader.includes("application/json")) {
@@ -208,25 +238,29 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
         width: CANVAS_WIDTH,
         height: CANVAS_HEIGHT,
         sdkVersion: SDK_VERSION,
-        protocolVersion: PROTOCOL_VERSION,
+        protocolVersion: resolvedProtocolVersion,
+        protocolVersionSource: protocolVersionWasDefaulted ? "defaulted" : "request",
         executionTimeMs: Date.now() - startTime,
       });
     } else {
       res.set("Content-Type", "image/png");
       res.set("X-Runtime-Hash", runtimeHash);
       res.set("X-SDK-Version", SDK_VERSION);
-      res.set("X-Protocol-Version", PROTOCOL_VERSION);
       res.send(pngBuffer);
     }
     
     if (!req.meteringSkipped) {
-      logUsage(req, res, runtimeHash, null);
+      logUsage(req, res, runtimeHash, null, resolvedProtocolVersion, protocolVersionWasDefaulted);
     }
   } catch (error) {
+    // For error cases, use default protocol version since we may not have parsed request
+    const errorProtocolVersion = DEFAULT_PROTOCOL_VERSION;
+    
     if (error.message && error.message.startsWith("PROTOCOL_VIOLATION:")) {
       if (!req.meteringSkipped) {
-        logUsage(req, res.status(400), null, error.message);
+        logUsage(req, res.status(400), null, error.message, errorProtocolVersion, true);
       }
+      res.set("X-Protocol-Version", errorProtocolVersion);
       return res.json({
         error: "PROTOCOL_VIOLATION",
         message: error.message.replace("PROTOCOL_VIOLATION: ", ""),
@@ -234,8 +268,9 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     }
     
     if (!req.meteringSkipped) {
-      logUsage(req, res.status(500), null, error.message);
+      logUsage(req, res.status(500), null, error.message, errorProtocolVersion, true);
     }
+    res.set("X-Protocol-Version", errorProtocolVersion);
     res.json({
       error: "RENDER_ERROR",
       message: error.message,
@@ -321,7 +356,7 @@ app.post("/render", async (req, res) => {
         fps,
         metadata: {
           sdk_version: SDK_VERSION,
-          protocol_version: PROTOCOL_VERSION,
+          protocol_version: DEFAULT_PROTOCOL_VERSION,
           node_version: NODE_VERSION,
           canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
           execution_time_ms: executionTime,
@@ -348,7 +383,7 @@ app.post("/render", async (req, res) => {
       imageBase64: base64Image,
       metadata: {
         sdk_version: SDK_VERSION,
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: DEFAULT_PROTOCOL_VERSION,
         node_version: NODE_VERSION,
         canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
         execution_time_ms: executionTime,
@@ -479,7 +514,7 @@ app.post("/verify", async (req, res) => {
         protocolCompliant: verified,
         metadata: {
           sdk_version: SDK_VERSION,
-          protocol_version: PROTOCOL_VERSION,
+          protocol_version: DEFAULT_PROTOCOL_VERSION,
           node_version: NODE_VERSION,
           execution_time_ms: executionTime,
           timestamp: new Date().toISOString(),
@@ -531,7 +566,7 @@ app.post("/verify", async (req, res) => {
       protocolCompliant: verified,
       metadata: {
         sdk_version: SDK_VERSION,
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: DEFAULT_PROTOCOL_VERSION,
         node_version: NODE_VERSION,
         execution_time_ms: executionTime,
         timestamp: new Date().toISOString(),
@@ -610,7 +645,7 @@ async function startServer() {
 ║                                                                              ║
 ║  Authority: @nexart/codemode-sdk (DIRECT IMPORT)                             ║
 ║  SDK Version: ${SDK_VERSION}                                                         ║
-║  Protocol Version: ${PROTOCOL_VERSION}                                                    ║
+║  Protocol Version: ${DEFAULT_PROTOCOL_VERSION}                                                    ║
 ║  Canvas: ${CANVAS_WIDTH}×${CANVAS_HEIGHT} (hard-locked)                                         ║
 ║                                                                              ║
 ║  Modes:                                                                      ║

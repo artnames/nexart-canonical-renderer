@@ -223,6 +223,7 @@ curl -I -X OPTIONS http://localhost:5000/health \
 | `DATABASE_URL` | Yes | - | PostgreSQL connection string |
 | `ADMIN_SECRET` | Yes | - | Secret for admin endpoints |
 | `METERING_REQUIRED` | No | `true` in production | If `false`, allows renders when DB unavailable (skips logging) |
+| `PROTOCOL_VERSION` | No | `1.2.0` | Default protocol version for requests without explicit version |
 
 **METERING_REQUIRED behavior:**
 - `true` (default in production): If DB is unavailable, `/api/render` returns 503
@@ -267,12 +268,50 @@ INSERT INTO api_keys (key_hash, label, plan, status, monthly_limit)
 VALUES ('YOUR_KEY_HASH', 'My App', 'free', 'active', 1000);
 ```
 
+### Protocol Version Defaulting
+
+The `/api/render` endpoint uses **lenient protocol version defaulting**:
+
+- If `protocolVersion` is **missing** from request: uses server default (currently `1.2.0`), returns `X-Protocol-Defaulted: true` header
+- If `protocolVersion` is **provided and supported**: uses that version, no defaulted header
+- If `protocolVersion` is **provided but unsupported**: returns 400 error
+
+**Response headers:**
+- `X-Protocol-Version`: The resolved protocol version used (always present)
+- `X-Protocol-Defaulted: true`: Only present when version was defaulted
+
+**JSON response includes:**
+```json
+{
+  "protocolVersion": "1.2.0",
+  "protocolVersionSource": "defaulted"  // or "request"
+}
+```
+
+**Test examples:**
+```bash
+# Without protocolVersion (expect X-Protocol-Defaulted: true)
+curl -D - -X POST http://localhost:5000/api/render \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "function setup() { background(100); }"}' \
+  -o /dev/null 2>&1 | grep -i protocol
+
+# With protocolVersion (no defaulted header)
+curl -D - -X POST http://localhost:5000/api/render \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"code": "function setup() { background(100); }", "protocolVersion": "1.2.0"}' \
+  -o /dev/null 2>&1 | grep -i protocol
+```
+
 ### Usage Logging
 
 Every `/api/render` request is logged to `usage_events`:
 - `api_key_id`: Which key made the request
 - `endpoint`, `status_code`, `duration_ms`
 - `width`, `height`, `sdk_version`, `protocol_version`
+- `protocol_defaulted`: Boolean indicating if version was defaulted
 - `runtime_hash`, `output_hash_prefix`
 - `error`: Error message if any
 

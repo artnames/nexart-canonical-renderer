@@ -102,8 +102,8 @@ export async function logUsageEvent(event) {
     await db.query(
       `INSERT INTO usage_events 
        (api_key_id, endpoint, status_code, duration_ms, width, height, 
-        sdk_version, protocol_version, runtime_hash, output_hash_prefix, error)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        sdk_version, protocol_version, protocol_defaulted, runtime_hash, output_hash_prefix, error)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         event.apiKeyId || null,
         event.endpoint,
@@ -113,6 +113,7 @@ export async function logUsageEvent(event) {
         event.height || null,
         event.sdkVersion || null,
         event.protocolVersion || null,
+        event.protocolDefaulted ?? null,
         event.runtimeHash || null,
         event.outputHashPrefix || null,
         event.error || null
