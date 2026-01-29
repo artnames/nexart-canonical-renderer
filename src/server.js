@@ -180,6 +180,11 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     const userId = req.apiKey?.userId;
     const quota = await getAccountQuota(userId);
 
+    // Set enforcement status header
+    if (quota.enforced === false) {
+      res.set("X-Quota-Enforced", "false");
+    }
+
     if (quota.exceeded) {
       const resetAt = await getQuotaResetDate();
       res.set("X-Quota-Limit", String(quota.limit));

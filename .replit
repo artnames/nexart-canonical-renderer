@@ -49,3 +49,4 @@ expertMode = true
 
 [userenv.development]
 ADMIN_SECRET = "test-admin-secret-67890"
+ENFORCE_QUOTA = "true"

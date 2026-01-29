@@ -218,6 +218,7 @@ Content-Type: application/json
 - `DATABASE_URL`: PostgreSQL connection string (auto-configured in Replit)
 - `ADMIN_SECRET`: Secret for admin endpoints
 - `METERING_REQUIRED`: If `false`, allows renders when DB unavailable
+- `ENFORCE_QUOTA`: If `false`, disables quota enforcement (kill switch). Default: `true` in production, `false` in development
 
 ### API Key Auth
 - `/api/render` requires `Authorization: Bearer <api_key>`

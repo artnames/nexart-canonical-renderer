@@ -97,9 +97,23 @@ export async function validateApiKey(apiKey) {
 
 const DEFAULT_MONTHLY_LIMIT = 100;
 
+function isQuotaEnforced() {
+  const env = process.env.ENFORCE_QUOTA;
+  // Default: true in production, false in development
+  if (env === undefined || env === null || env === "") {
+    return process.env.NODE_ENV === "production";
+  }
+  return env.toLowerCase() !== "false" && env !== "0";
+}
+
 export async function getAccountQuota(userId) {
+  // Kill switch: if ENFORCE_QUOTA=false, always return unlimited quota
+  if (!isQuotaEnforced()) {
+    return { limit: Infinity, used: 0, remaining: Infinity, exceeded: false, enforced: false };
+  }
+
   const db = getPool();
-  if (!db) return { limit: DEFAULT_MONTHLY_LIMIT, used: 0, available: true };
+  if (!db) return { limit: DEFAULT_MONTHLY_LIMIT, used: 0, remaining: DEFAULT_MONTHLY_LIMIT, exceeded: false };
 
   try {
     let monthlyLimit = DEFAULT_MONTHLY_LIMIT;
@@ -131,7 +145,8 @@ export async function getAccountQuota(userId) {
       limit: monthlyLimit,
       used,
       remaining: Math.max(0, monthlyLimit - used),
-      exceeded: used >= monthlyLimit
+      exceeded: used >= monthlyLimit,
+      enforced: true
     };
   } catch (error) {
     console.error("[DB] Quota check error:", error.message);

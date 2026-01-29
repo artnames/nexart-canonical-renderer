@@ -1,0 +1,58 @@
+You are my release engineer. I am about to deploy account-level quota enforcement to the NexArt canonical renderer node (Railway Postgres).
+
+Goal
+Ensure monthly quota is enforced at the ACCOUNT level (accounts.user_id), not per-key, and only counts successful certified renders:
+- usage_events.endpoint = '/api/render'
+- status_code BETWEEN 200 AND 299
+- ts >= date_trunc('month', now())
+Across ALL keys belonging to the same user_id (api_keys.user_id), regardless of how many keys.
+
+Hard requirements (must all be true)
+1) The quota check happens BEFORE rendering work starts.
+2) QUOTA counts only successful /api/render 2xx, NOT audit events and NOT failures.
+3) Revoked keys (status='revoked') must not authorize, and must not be counted.
+4) Response on quota exceeded:
+   - HTTP 429
+   - JSON error: { error: "QUOTA_EXCEEDED", message: ... }
+   - Include headers on ALL /api/render responses:
+     X-Quota-Limit, X-Quota-Used, X-Quota-Remaining
+     (optional: X-Quota-Reset)
+5) Add a kill switch env var (preferred):
+   ENFORCE_QUOTA=true/false (default true in production)
+6) Ensure queries are indexed / efficient (no full table scans at scale).
+
+What to do
+A) Inspect the current code (server + db layer):
+- Identify exactly where /api/render validates the API key and how it gets user_id.
+- Show me the exact quota query being used and whether it is correct.
+- Ensure the quota query aggregates across all keys for the user, not per key.
+- Ensure the query filters endpoint, status_code, ts (month), and active keys if needed.
+
+B) Inspect database schema assumptions:
+- Confirm tables/columns used exist:
+  accounts(user_id, plan, monthly_limit)
+  api_keys(id, user_id, status)
+  usage_events(api_key_id, endpoint, status_code, ts)
+- Confirm FK exists: api_keys.user_id -> accounts.user_id
+- Confirm index coverage for quota query:
+  usage_events(ts), usage_events(endpoint), usage_events(api_key_id)
+  api_keys(user_id), api_keys(status)
+
+C) Produce a “pre-deploy SQL + tests” pack:
+1) SQL to set a test account limit low (e.g. 2) for a given user_id.
+2) curl commands to hit /api/render 3 times:
+   - Expect: 200, 200, then 429
+3) SQL to confirm renders counted match expectation.
+4) A rollback plan: how to disable enforcement quickly (kill switch) and/or revert.
+
+Output format
+1) Findings: bullet list of any issues you found (or “none”).
+2) Exact code edits required (file paths + patch-like snippets).
+3) SQL pack (copy-pasteable).
+4) curl test pack (copy-pasteable).
+5) GO / NO-GO decision with reasons.
+
+Constraints
+- Do NOT invent files. Only modify what exists.
+- Keep changes minimal and safe.
+- Do not remove logging; if quota exceeded, log an event with error='QUOTA_EXCEEDED' and status_code=429.
