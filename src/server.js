@@ -181,12 +181,20 @@ app.use(requestCounterMiddleware);
 app.use(requestLoggingMiddleware);
 
 app.get("/ready", async (req, res) => {
+  const identity = {
+    node: "nexart-canonical",
+    version: NODE_VERSION,
+    sdk_version: SDK_VERSION,
+    protocol_version: DEFAULT_PROTOCOL_VERSION
+  };
+
   const envCheck = checkRequiredEnvVars();
   if (!envCheck.ok) {
     return res.status(503).json({
       status: "not_ready",
       reason: "missing_database_url",
-      db: "fail"
+      db: "fail",
+      ...identity
     });
   }
 
@@ -194,7 +202,8 @@ app.get("/ready", async (req, res) => {
     return res.status(503).json({
       status: "not_ready",
       reason: "server_not_initialized",
-      db: "fail"
+      db: "fail",
+      ...identity
     });
   }
 
@@ -203,17 +212,16 @@ app.get("/ready", async (req, res) => {
     return res.status(503).json({
       status: "not_ready",
       reason: "db_ping_failed",
-      db: "fail"
+      db: "fail",
+      ...identity
     });
   }
 
   res.json({
     status: "ready",
-    node: "nexart-canonical",
-    version: NODE_VERSION,
-    sdk_version: SDK_VERSION,
-    protocol_version: DEFAULT_PROTOCOL_VERSION,
-    db: "ok"
+    db: "ok",
+    db_latency_ms: dbPing.latencyMs,
+    ...identity
   });
 });
 

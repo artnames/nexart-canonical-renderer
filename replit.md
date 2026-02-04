@@ -256,6 +256,12 @@ npm start      # Production (Railway)
 - **Replicas**: Can safely scale to N+1 replicas
 - **Graceful shutdown**: 15s drain timeout on SIGTERM/SIGINT
 
+### Scaling Guardrail (pool.max)
+- `pool.max` is set to 10 connections per replica
+- 2 replicas can open up to ~20 DB connections
+- 3–5 replicas may hit Railway Postgres connection limits (default 97)
+- **Recommendation**: Lower `pool.max` to 3–5 per replica when scaling beyond 2 replicas
+
 ## Important Constraints
 
 - Do NOT redesign the protocol

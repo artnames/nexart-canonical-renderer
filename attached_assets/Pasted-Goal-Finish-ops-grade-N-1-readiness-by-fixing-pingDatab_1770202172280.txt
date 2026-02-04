@@ -1,0 +1,81 @@
+Goal: Finish ops-grade N+1 readiness by fixing pingDatabase correctness (real timeout + real latency), adding db_latency_ms to /ready, ensuring /ready includes required identity fields in both 200 and 503, and adding the pool.max scaling guardrail note.
+
+Scope: Only touch:
+	•	src/db.js
+	•	/ready handler in src/server.js
+	•	replit.md (ops note only)
+
+Do not change any rendering logic, protocol behavior, determinism logic, or /api/render payload schemas.
+	1.	Fix pingDatabase(timeoutMs=1500) with a REAL timeout and REAL latency
+Current code uses AbortController but pg isn’t using it, so the timeout is ineffective.
+Implement timeout using Promise.race:
+
+	•	const start = Date.now()
+	•	await Promise.race([
+db.query(“SELECT 1 AS ping”),
+new Promise((_, reject) => setTimeout(() => reject(new Error(“timeout”)), timeoutMs))
+])
+	•	const latencyMs = Date.now() - start
+
+Return stable shapes ONLY:
+	•	Success: { ok: true, latencyMs }
+	•	Fail: { ok: false, reason: “no_pool” | “timeout” | “query_failed” }
+
+Log raw error internally but return reason: “query_failed”.
+	2.	Update /ready response payloads
+Ensure BOTH 200 and 503 include these identity fields:
+node, version, sdk_version, protocol_version
+
+	•	If DATABASE_URL missing:
+503:
+{
+“status”:“not_ready”,
+“reason”:“missing_database_url”,
+“db”:“fail”,
+“node”:“nexart-canonical”,
+“version”:“1.0.0”,
+“sdk_version”:“1.8.4”,
+“protocol_version”:“1.2.0”
+}
+	•	If DB ping fails/timeouts:
+503:
+{
+“status”:“not_ready”,
+“reason”:“db_ping_failed”,
+“db”:“fail”,
+“node”:“nexart-canonical”,
+“version”:“1.0.0”,
+“sdk_version”:“1.8.4”,
+“protocol_version”:“1.2.0”
+}
+	•	If success:
+200 must include db_latency_ms:
+{
+“status”:“ready”,
+“db”:“ok”,
+“db_latency_ms”: ,
+“node”:“nexart-canonical”,
+“version”:“1.0.0”,
+“sdk_version”:“1.8.4”,
+“protocol_version”:“1.2.0”
+}
+
+	3.	replit.md ops note (scaling guardrail)
+Add a short note:
+
+	•	pool.max is 10 => 2 replicas can open up to ~20 DB connections
+	•	3–5 replicas may hit Railway Postgres connection limits
+	•	Recommend lowering pool.max to 3–5 per replica when scaling up
+Do NOT change pool.max in code in this patch; document only.
+
+Output required:
+	•	list files changed + diffs for pingDatabase + /ready
+	•	curl commands + expected responses for /health and /ready
+
+⸻
+
+Quick sanity check after it’s done
+	•	curl /ready returns fast (≤ 1.5s) even if DB is unreachable
+	•	200 includes db_latency_ms
+	•	503 includes identity fields too
+	•	replit.md includes the pool.max scaling warning

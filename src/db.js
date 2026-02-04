@@ -66,16 +66,22 @@ export async function pingDatabase(timeoutMs = 1500) {
   const db = getPool();
   if (!db) return { ok: false, reason: "no_pool" };
 
+  const start = Date.now();
+
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    await Promise.race([
+      db.query("SELECT 1 AS ping"),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs))
+    ]);
     
-    const result = await db.query("SELECT 1 AS ping");
-    clearTimeout(timeout);
-    
-    return { ok: result.rows[0]?.ping === 1, latencyMs: Date.now() };
+    const latencyMs = Date.now() - start;
+    return { ok: true, latencyMs };
   } catch (error) {
-    return { ok: false, reason: error.message };
+    if (error.message === "timeout") {
+      return { ok: false, reason: "timeout" };
+    }
+    console.error("[DB] Ping failed:", error.message);
+    return { ok: false, reason: "query_failed" };
   }
 }
 
