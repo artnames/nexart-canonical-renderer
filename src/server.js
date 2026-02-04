@@ -5,7 +5,7 @@ import crypto from "crypto";
 import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
-import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase } from "./db.js";
+import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool } from "./db.js";
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
   createP5Runtime,
@@ -79,8 +79,7 @@ function requestLoggingMiddleware(req, res, next) {
   
   res.on("finish", () => {
     const duration = Date.now() - start;
-    const skipPaths = ["/health", "/ready", "/version"];
-    if (!skipPaths.includes(req.path)) {
+    if (req.path.startsWith("/api/")) {
       console.log(`[REQ] ${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
     }
   });
@@ -186,14 +185,16 @@ app.get("/ready", async (req, res) => {
   if (!envCheck.ok) {
     return res.status(503).json({
       status: "not_ready",
-      reason: `Missing env vars: ${envCheck.missing.join(", ")}`
+      reason: "missing_database_url",
+      db: "fail"
     });
   }
 
   if (!serverReady) {
     return res.status(503).json({
       status: "not_ready",
-      reason: "Server not initialized"
+      reason: "server_not_initialized",
+      db: "fail"
     });
   }
 
@@ -201,7 +202,8 @@ app.get("/ready", async (req, res) => {
   if (!dbPing.ok) {
     return res.status(503).json({
       status: "not_ready",
-      reason: `Database unreachable: ${dbPing.reason || "timeout"}`
+      reason: "db_ping_failed",
+      db: "fail"
     });
   }
 
@@ -210,7 +212,8 @@ app.get("/ready", async (req, res) => {
     node: "nexart-canonical",
     version: NODE_VERSION,
     sdk_version: SDK_VERSION,
-    protocol_version: DEFAULT_PROTOCOL_VERSION
+    protocol_version: DEFAULT_PROTOCOL_VERSION,
+    db: "ok"
   });
 });
 
@@ -749,7 +752,13 @@ async function gracefulShutdown(server, signal) {
   console.log(`[shutdown] received ${signal}, draining...`);
   isShuttingDown = true;
 
-  server.close(() => {
+  server.close(async () => {
+    try {
+      await closePool();
+      console.log("[shutdown] pool closed");
+    } catch (err) {
+      console.error("[shutdown] error closing pool:", err.message);
+    }
     console.log("[shutdown] closed, exiting");
     process.exit(0);
   });
@@ -758,7 +767,7 @@ async function gracefulShutdown(server, signal) {
   const POLL_INTERVAL = 100;
   let elapsed = 0;
 
-  const waitForDrain = setInterval(() => {
+  const waitForDrain = setInterval(async () => {
     elapsed += POLL_INTERVAL;
     
     if (inFlightRequests === 0) {
@@ -770,6 +779,12 @@ async function gracefulShutdown(server, signal) {
     if (elapsed >= DRAIN_TIMEOUT) {
       clearInterval(waitForDrain);
       console.log(`[shutdown] timeout reached, ${inFlightRequests} requests still in flight, force closing`);
+      try {
+        await closePool();
+        console.log("[shutdown] pool closed");
+      } catch (err) {
+        console.error("[shutdown] error closing pool:", err.message);
+      }
       process.exit(0);
     }
   }, POLL_INTERVAL);

@@ -25,6 +25,13 @@ export function getPool() {
   return pool;
 }
 
+export async function closePool() {
+  if (pool) {
+    await pool.end();
+    pool = null;
+  }
+}
+
 export async function runMigrations() {
   const db = getPool();
   if (!db) return false;
@@ -256,12 +263,5 @@ export async function getUsageMonth() {
   } catch (error) {
     console.error("[DB] Usage query error:", error.message);
     return [];
-  }
-}
-
-export async function closePool() {
-  if (pool) {
-    await pool.end();
-    pool = null;
   }
 }
