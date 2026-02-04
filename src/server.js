@@ -35,6 +35,7 @@ const CANVAS_WIDTH = 1950;
 const CANVAS_HEIGHT = 2400;
 const NODE_VERSION = "1.0.0";
 const SDK_VERSION = SDK_VERSION_FROM_SDK || "1.8.4";
+const INSTANCE_ID = process.env.RAILWAY_REPLICA_ID || process.env.HOSTNAME || "unknown";
 
 // Single source of truth for default protocol version
 // Can be overridden via env var, falls back to SDK constant or hardcoded default
@@ -80,7 +81,7 @@ function requestLoggingMiddleware(req, res, next) {
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (req.path.startsWith("/api/")) {
-      console.log(`[REQ] ${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
+      console.log(`[REQ] instance=${INSTANCE_ID} ${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
     }
   });
   
@@ -185,7 +186,8 @@ app.get("/ready", async (req, res) => {
     node: "nexart-canonical",
     version: NODE_VERSION,
     sdk_version: SDK_VERSION,
-    protocol_version: DEFAULT_PROTOCOL_VERSION
+    protocol_version: DEFAULT_PROTOCOL_VERSION,
+    instance_id: INSTANCE_ID
   };
 
   const envCheck = checkRequiredEnvVars();
@@ -232,6 +234,7 @@ app.get("/health", (req, res) => {
     version: NODE_VERSION,
     sdk_version: SDK_VERSION,
     protocol_version: DEFAULT_PROTOCOL_VERSION,
+    instance_id: INSTANCE_ID,
     canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
     timestamp: new Date().toISOString(),
   });
