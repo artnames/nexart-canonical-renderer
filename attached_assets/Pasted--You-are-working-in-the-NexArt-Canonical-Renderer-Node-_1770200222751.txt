@@ -1,0 +1,71 @@
+
+You are working in the NexArt Canonical Renderer Node repo (Express/Node).
+Goal: make the service safe for N+1 replicas on Railway without changing any determinism or render outputs.
+
+Scope (STRICT)
+	•	Only touch the server/service code needed for:
+	1.	Add a readiness endpoint (GET /ready or /readyz)
+	2.	Add graceful shutdown on SIGTERM/SIGINT
+	3.	Add basic startup + request logging (no noisy logs per frame/render)
+	•	Do not change any rendering logic, seeds, hashing, PNG outputs, or protocol behavior.
+	•	Do not add billing/Stripe work.
+	•	Do not refactor unrelated files.
+
+Requirements
+
+1) Add /ready endpoint
+Implement GET /ready that returns:
+	•	200 with JSON:
+
+{
+  "status": "ready",
+  "node": "nexart-canonical",
+  "version": "<server version>",
+  "sdk_version": "<sdk version if available>",
+  "protocol_version": "<protocol version if available>"
+}
+
+	•	503 with JSON:
+
+{
+  "status": "not_ready",
+  "reason": "<short reason>"
+}
+
+Readiness conditions:
+	•	Required env vars must be present (define a small list based on this repo, e.g. SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and any renderer secrets you already use).
+	•	If Supabase is used in this node: perform a cheap DB ping (example: select a constant or call a lightweight endpoint). Timeout quickly (e.g. 1500ms) and fail readiness if unreachable.
+	•	If Supabase is NOT used here: readiness should just validate env + “server initialized” flag.
+
+Also keep existing GET /health unchanged except you may remove anything that’s misleading for determinism (optional). Do not break current health response format unless necessary.
+
+2) Add graceful shutdown
+On SIGTERM and SIGINT:
+	•	Stop accepting new connections.
+	•	Allow in-flight requests to finish for up to 15 seconds.
+	•	Then force close and exit with code 0.
+	•	Log: "[shutdown] received SIGTERM, draining...", "[shutdown] closed, exiting".
+
+Implementation details:
+	•	Keep a reference to the http server returned by app.listen(...).
+	•	Use server.close() to stop new connections.
+	•	Track in-flight requests with a counter middleware:
+	•	increment on request start
+	•	decrement on res.finish/res.close
+	•	During shutdown, if counter > 0, wait (poll) until 0 or timeout.
+
+3) Light logging
+	•	On boot: log version, protocol_version, sdk_version, port.
+	•	On each request: log method, path, status, duration ms only for non-static routes (avoid spamming assets).
+
+Output
+	•	Make the changes.
+	•	Show me the exact files modified and the code diffs (or full updated files if smaller).
+	•	Provide a short “Railway configuration” note: set health check path to /ready and scale replicas to 2.
+
+Acceptance test (must pass)
+	•	GET /health returns 200.
+	•	GET /ready returns 200 when env vars are present and DB ping succeeds (if applicable).
+	•	If an env var is missing, /ready returns 503 with a clear reason.
+	•	When process receives SIGTERM, it drains and exits cleanly.
+

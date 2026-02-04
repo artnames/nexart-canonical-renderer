@@ -60,6 +60,7 @@ The SDK is imported via `createRequire()` workaround due to ESM compatibility is
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Node status with version info |
+| `/ready` | GET | Readiness check for Railway (DB ping + env validation) |
 | `/version` | GET | Full version info (SDK, protocol, build) |
 | `/render` | POST | Execute snapshot (static or loop) |
 | `/api/render` | POST | CLI contract - static render (code, seed, VAR) |
@@ -249,6 +250,11 @@ The node is configured for Railway deployment via Dockerfile.
 npm run dev    # Development (Replit)
 npm start      # Production (Railway)
 ```
+
+### Railway Configuration
+- **Health check path**: `/ready`
+- **Replicas**: Can safely scale to N+1 replicas
+- **Graceful shutdown**: 15s drain timeout on SIGTERM/SIGINT
 
 ## Important Constraints
 

@@ -5,7 +5,7 @@ import crypto from "crypto";
 import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
-import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate } from "./db.js";
+import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase } from "./db.js";
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
   createP5Runtime,
@@ -45,6 +45,48 @@ const SUPPORTED_PROTOCOL_VERSIONS = ["1.0.0", "1.1.0", "1.2.0"];
 
 const apiKeyAuth = createAuthMiddleware();
 const logUsage = createUsageLogger(SDK_VERSION, DEFAULT_PROTOCOL_VERSION, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+let serverReady = false;
+let inFlightRequests = 0;
+let isShuttingDown = false;
+
+const REQUIRED_ENV_VARS = ["DATABASE_URL"];
+
+function checkRequiredEnvVars() {
+  const missing = REQUIRED_ENV_VARS.filter(v => !process.env[v]);
+  return { ok: missing.length === 0, missing };
+}
+
+function requestCounterMiddleware(req, res, next) {
+  if (isShuttingDown) {
+    return res.status(503).json({ error: "SERVICE_UNAVAILABLE", message: "Server is shutting down" });
+  }
+  
+  inFlightRequests++;
+  
+  const cleanup = () => {
+    inFlightRequests--;
+  };
+  
+  res.on("finish", cleanup);
+  res.on("close", cleanup);
+  
+  next();
+}
+
+function requestLoggingMiddleware(req, res, next) {
+  const start = Date.now();
+  
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    const skipPaths = ["/health", "/ready", "/version"];
+    if (!skipPaths.includes(req.path)) {
+      console.log(`[REQ] ${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
+    }
+  });
+  
+  next();
+}
 
 function computeHash(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
@@ -136,6 +178,41 @@ function executeSnapshot(snapshot) {
 }
 
 app.use(express.json({ limit: "10mb" }));
+app.use(requestCounterMiddleware);
+app.use(requestLoggingMiddleware);
+
+app.get("/ready", async (req, res) => {
+  const envCheck = checkRequiredEnvVars();
+  if (!envCheck.ok) {
+    return res.status(503).json({
+      status: "not_ready",
+      reason: `Missing env vars: ${envCheck.missing.join(", ")}`
+    });
+  }
+
+  if (!serverReady) {
+    return res.status(503).json({
+      status: "not_ready",
+      reason: "Server not initialized"
+    });
+  }
+
+  const dbPing = await pingDatabase(1500);
+  if (!dbPing.ok) {
+    return res.status(503).json({
+      status: "not_ready",
+      reason: `Database unreachable: ${dbPing.reason || "timeout"}`
+    });
+  }
+
+  res.json({
+    status: "ready",
+    node: "nexart-canonical",
+    version: NODE_VERSION,
+    sdk_version: SDK_VERSION,
+    protocol_version: DEFAULT_PROTOCOL_VERSION
+  });
+});
 
 app.get("/health", (req, res) => {
   res.json({
@@ -668,12 +745,47 @@ app.get("/admin/usage/month", requireAdmin, async (req, res) => {
   }
 });
 
+async function gracefulShutdown(server, signal) {
+  console.log(`[shutdown] received ${signal}, draining...`);
+  isShuttingDown = true;
+
+  server.close(() => {
+    console.log("[shutdown] closed, exiting");
+    process.exit(0);
+  });
+
+  const DRAIN_TIMEOUT = 15000;
+  const POLL_INTERVAL = 100;
+  let elapsed = 0;
+
+  const waitForDrain = setInterval(() => {
+    elapsed += POLL_INTERVAL;
+    
+    if (inFlightRequests === 0) {
+      clearInterval(waitForDrain);
+      console.log("[shutdown] all requests drained");
+      return;
+    }
+    
+    if (elapsed >= DRAIN_TIMEOUT) {
+      clearInterval(waitForDrain);
+      console.log(`[shutdown] timeout reached, ${inFlightRequests} requests still in flight, force closing`);
+      process.exit(0);
+    }
+  }, POLL_INTERVAL);
+}
+
 async function startServer() {
   console.log("[STARTUP] Running database migrations...");
   await runMigrations();
   
-  app.listen(PORT, "0.0.0.0", () => {
-  console.log(`
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    serverReady = true;
+    
+    console.log(`[BOOT] NexArt Canonical Node v${NODE_VERSION}`);
+    console.log(`[BOOT] SDK: ${SDK_VERSION} | Protocol: ${DEFAULT_PROTOCOL_VERSION} | Port: ${PORT}`);
+    console.log(`[BOOT] Canvas: ${CANVAS_WIDTH}×${CANVAS_HEIGHT}`);
+    console.log(`
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║  NexArt Canonical Node v${NODE_VERSION}                                                  ║
 ║                                                                              ║
@@ -688,6 +800,7 @@ async function startServer() {
 ║                                                                              ║
 ║  Endpoints:                                                                  ║
 ║    GET  /health         - Node status (public)                               ║
+║    GET  /ready          - Readiness check (Railway health check)             ║
 ║    GET  /version        - Full version info (public)                         ║
 ║    POST /render         - Execute snapshot (public)                          ║
 ║    POST /api/render     - CLI contract (API key required)                    ║
@@ -696,8 +809,11 @@ async function startServer() {
 ║                                                                              ║
 ║  Running on port ${PORT}                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-  `);
+    `);
   });
+
+  process.on("SIGTERM", () => gracefulShutdown(server, "SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown(server, "SIGINT"));
 }
 
 startServer();

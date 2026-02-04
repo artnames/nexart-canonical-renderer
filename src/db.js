@@ -55,6 +55,23 @@ export async function runMigrations() {
   }
 }
 
+export async function pingDatabase(timeoutMs = 1500) {
+  const db = getPool();
+  if (!db) return { ok: false, reason: "no_pool" };
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    
+    const result = await db.query("SELECT 1 AS ping");
+    clearTimeout(timeout);
+    
+    return { ok: result.rows[0]?.ping === 1, latencyMs: Date.now() };
+  } catch (error) {
+    return { ok: false, reason: error.message };
+  }
+}
+
 export function hashApiKey(apiKey) {
   return crypto.createHash("sha256").update(apiKey).digest("hex");
 }
