@@ -17,7 +17,7 @@ export const versionInfo = {
   sdkVersion,
   sdkDependency,
   protocolVersion,
-  serviceBuild: process.env.GIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || "dev",
+  serviceBuild: process.env.GIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || "unknown",
   nodeVersion: process.version,
 };
 

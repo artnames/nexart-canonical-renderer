@@ -298,9 +298,10 @@ Content-Type: application/json
 
 ## Version Info
 
+- Service Version: from `package.json` (currently 0.2.0)
 - SDK Version: 1.8.4
 - Protocol Version: 1.2.0
-- Node Version: 1.0.0
+- Service Build: git SHA (from `GIT_SHA` or `RAILWAY_GIT_COMMIT_SHA` env, otherwise "unknown")
 
 ## Authentication & Metering
 
@@ -350,6 +351,50 @@ npm start      # Production (Railway)
 - 2 replicas can open up to ~20 DB connections
 - 3–5 replicas may hit Railway Postgres connection limits (default 97)
 - **Recommendation**: Lower `pool.max` to 3–5 per replica when scaling beyond 2 replicas
+
+## Release Process
+
+Before deploying, follow this checklist:
+
+1. **Bump version** in `package.json`:
+   - MINOR bump (`x.(y+1).0`) for new endpoints or behavior changes
+   - PATCH bump (`x.y.(z+1)`) for bugfixes
+2. **Run tests**: `npx vitest run`
+3. **Deploy** to Railway
+4. **Verify** version and health after deploy:
+
+```bash
+curl https://your-node-url/version | jq .
+curl https://your-node-url/health | jq .
+```
+
+Expected `/version` output:
+```json
+{
+  "service": "nexart-node",
+  "serviceVersion": "0.2.0",
+  "sdkVersion": "1.8.4",
+  "sdkDependency": "1.8.4",
+  "protocolVersion": "1.2.0",
+  "serviceBuild": "<git-sha>",
+  "nodeVersion": "v22.x.x",
+  "timestamp": "2026-02-13T..."
+}
+```
+
+Expected `/health` output:
+```json
+{
+  "status": "ok",
+  "node": "nexart-canonical",
+  "version": "0.2.0",
+  "sdk_version": "1.8.4",
+  "protocol_version": "1.2.0",
+  "instance_id": "<hostname>",
+  "canvas": { "width": 1950, "height": 2400 },
+  "timestamp": "2026-02-13T..."
+}
+```
 
 ## Important Constraints
 

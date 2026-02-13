@@ -16,6 +16,10 @@ import {
   CODE_MODE_PROTOCOL_VERSION,
   SDK_VERSION as SDK_VERSION_FROM_SDK
 } from "@nexart/codemode-sdk/node";
+import { createRequire } from "module";
+
+const requireJson = createRequire(import.meta.url);
+const packageJson = requireJson("../package.json");
 
 const app = express();
 
@@ -35,7 +39,7 @@ const PORT = process.env.PORT || 5000;
 
 const CANVAS_WIDTH = 1950;
 const CANVAS_HEIGHT = 2400;
-const NODE_VERSION = "1.0.0";
+const NODE_VERSION = packageJson.version || "0.2.0";
 const SDK_VERSION = SDK_VERSION_FROM_SDK || "1.8.4";
 const INSTANCE_ID = process.env.RAILWAY_REPLICA_ID || process.env.HOSTNAME || "unknown";
 
