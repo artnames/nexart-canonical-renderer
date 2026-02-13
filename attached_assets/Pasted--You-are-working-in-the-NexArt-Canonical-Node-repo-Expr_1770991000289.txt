@@ -1,0 +1,95 @@
+
+You are working in the NexArt Canonical Node repo (Express). The node already relies on @nexart/codemode-sdk for Code Mode canonical behavior. We recently added /api/attest, but attesting AI CER bundles is failing because the node validates against Code Mode fields.
+
+Goal
+
+Update /api/attest to support two bundle types:
+	1.	Code Mode bundle (existing behavior)
+
+	•	keep current verification logic (do not change behavior)
+
+	2.	AI Execution CER bundle (new)
+
+	•	bundleType === "cer.ai.execution.v1"
+	•	verification MUST be done by importing and calling the published NPM package @nexart/ai-execution (do not reimplement canonical JSON / hashing in the node)
+
+Requirements
+	•	Add dependency: @nexart/ai-execution (latest published) to the node package.json and install it.
+	•	In /api/attest, detect bundle type:
+	•	if bundleType === "cer.ai.execution.v1":
+	•	call verifyCer(bundle) from @nexart/ai-execution
+	•	if not ok => return 400 with { error: "INVALID_BUNDLE", details: [...] } using the errors returned by the library (map them into a readable details array)
+	•	if ok => return 200 with { ok: true, attestation: {...}, bundleType, certificateHash }
+	•	else:
+	•	run existing Code Mode bundle attest logic unchanged
+
+Attestation response shape (for AI CER too)
+
+Return an attestation object that is stable + auditor-friendly:
+	•	attestedAt ISO
+	•	attestationId uuid
+	•	bundleType
+	•	certificateHash (keep the bundle’s format, e.g. sha256:…)
+	•	nodeRuntimeHash (existing header or runtime fingerprint)
+	•	protocolVersion (node protocol)
+	•	requestId (railway request id or node request id)
+Optionally include:
+	•	verified: true
+	•	checks: ["snapshot_hashes", "certificate_hash"]
+
+Important compatibility notes
+	•	Do not change /api/render.
+	•	Quota: /api/attest must count toward the same monthly quota as /api/render (keep existing behavior).
+	•	Auth stays required: Authorization: Bearer <api_key>
+
+Tests
+
+Add/extend tests to cover:
+	•	AI CER valid bundle returns 200
+	•	AI CER tampered output returns 400 INVALID_BUNDLE
+	•	AI CER invalid certificateHash format returns 400 INVALID_BUNDLE
+	•	Ensure existing Code Mode attest tests still pass unchanged
+
+Fixture (must pass)
+
+Use this exact AI CER bundle JSON for tests:
+
+{
+  "bundleType": "cer.ai.execution.v1",
+  "certificateHash": "sha256:1dc840c0b72bf39ebb0f9ed63cfdab76b581c3cdaf55f5b8276ded49b364e52d",
+  "createdAt": "2026-02-13T13:13:33.112Z",
+  "version": "0.1",
+  "snapshot": {
+    "type": "ai.execution.v1",
+    "protocolVersion": "1.2.0",
+    "executionSurface": "ai",
+    "executionId": "exec_c7093dd242d4b87c",
+    "timestamp": "2026-02-13T13:13:33.111Z",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "modelVersion": null,
+    "prompt": "You are a helpful assistant.",
+    "input": "Summarize the key risks in Q4 earnings.",
+    "inputHash": "sha256:92404e9f72809c9b7f81aaa976825e71d17e70da2633a7258d72e54ba46bd60e",
+    "parameters": { "temperature": 0, "maxTokens": 1024, "topP": null, "seed": null },
+    "output": "Key risks identified: (1) Revenue contraction of 12% YoY, (2) Margin pressure from increased operating costs, (3) Regulatory uncertainty in EU markets.",
+    "outputHash": "sha256:fb45b106fcf36c557672c39eecffd44e77e55176a92756429d341ac571211293",
+    "sdkVersion": "0.1.0",
+    "appId": "nexart.io-demo"
+  },
+  "meta": { "source": "nexart.io", "tags": ["demo"] }
+}
+
+Docs
+
+Update node docs for /api/attest to clearly state:
+	•	Supports both Code Mode bundles and AI CER bundles
+	•	AI verification is canonical to @nexart/ai-execution
+	•	AI certificateHash format is sha256:<hex> (not raw hex)
+
+Output required at end
+	•	List of files changed
+	•	Exact curl command to call /api/attest with --data-binary @cer.json
+	•	Example success JSON response
+
+⸻

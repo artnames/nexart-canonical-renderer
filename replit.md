@@ -146,16 +146,19 @@ Content-Type: application/json
 
 ## Attest Endpoint
 
-Provides integrity attestation for AI CER (Certified Execution Record) bundles. This endpoint verifies bundle integrity and returns a signed attestation — it does NOT execute renders or verify model determinism.
+Provides integrity attestation for CER bundles. Supports two bundle types:
 
-### Request
+1. **Code Mode bundles** — Existing behavior. Verification uses the node's own canonical JSON hashing logic. Hash format is raw hex (`<64-char-hex>`).
+2. **AI Execution CER bundles** (`bundleType === "cer.ai.execution.v1"`) — Verification is canonical to the `@nexart/ai-execution` NPM package (calls `verifyCer(bundle)`). Hash format is `sha256:<hex>`.
+
+### Code Mode Bundle Request
 ```json
 POST /api/attest
 Authorization: Bearer <api_key>
 Content-Type: application/json
 
 {
-  "bundleType": "cer.ai.execution.v1",
+  "bundleType": "cer.codemode.v1",
   "version": "1.0.0",
   "createdAt": "2025-01-01T00:00:00.000Z",
   "snapshot": {
@@ -163,8 +166,41 @@ Content-Type: application/json
     "seed": "unique-seed",
     "vars": [50, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   },
-  "inputHash": "<sha256>",
-  "certificateHash": "<sha256>"
+  "inputHash": "<64-char-hex>",
+  "certificateHash": "<64-char-hex>"
+}
+```
+
+### AI CER Bundle Request
+```json
+POST /api/attest
+Authorization: Bearer <api_key>
+Content-Type: application/json
+
+{
+  "bundleType": "cer.ai.execution.v1",
+  "version": "0.1",
+  "createdAt": "2026-02-13T13:13:33.112Z",
+  "snapshot": {
+    "type": "ai.execution.v1",
+    "protocolVersion": "1.2.0",
+    "executionSurface": "ai",
+    "executionId": "exec_c7093dd242d4b87c",
+    "timestamp": "2026-02-13T13:13:33.111Z",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "modelVersion": null,
+    "prompt": "You are a helpful assistant.",
+    "input": "Summarize the key risks in Q4 earnings.",
+    "inputHash": "sha256:<hex>",
+    "parameters": { "temperature": 0, "maxTokens": 1024, "topP": null, "seed": null },
+    "output": "Key risks identified: ...",
+    "outputHash": "sha256:<hex>",
+    "sdkVersion": "0.1.0",
+    "appId": "nexart.io-demo"
+  },
+  "certificateHash": "sha256:<hex>",
+  "meta": { "source": "nexart.io", "tags": ["demo"] }
 }
 ```
 
@@ -172,17 +208,24 @@ Content-Type: application/json
 ```json
 {
   "ok": true,
-  "certificateHash": "<sha256>",
-  "attestationHash": "<sha256>",
-  "nodeRuntimeHash": "<sha256>",
-  "protocolVersion": "1.2.0",
-  "attestedAt": "2025-01-01T00:00:00.000Z",
-  "requestId": "<uuid>"
+  "bundleType": "cer.ai.execution.v1",
+  "certificateHash": "sha256:<hex>",
+  "attestation": {
+    "attestedAt": "2025-01-01T00:00:00.000Z",
+    "attestationId": "<uuid>",
+    "bundleType": "cer.ai.execution.v1",
+    "certificateHash": "sha256:<hex>",
+    "nodeRuntimeHash": "<64-char-hex>",
+    "protocolVersion": "1.2.0",
+    "requestId": "<uuid>",
+    "verified": true,
+    "checks": ["snapshot_hashes", "certificate_hash"]
+  }
 }
 ```
 
 ### Error Responses
-- **400** `INVALID_BUNDLE` — Bundle validation failed (mismatched hashes, missing fields, invalid format)
+- **400** `INVALID_BUNDLE` — Bundle validation failed (mismatched hashes, missing fields, invalid format). Returns `details` array with readable error messages.
 - **401** `UNAUTHORIZED` — Missing or invalid API key
 - **429** `QUOTA_EXCEEDED` — Monthly quota exceeded (attestations share quota with renders)
 

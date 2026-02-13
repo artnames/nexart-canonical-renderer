@@ -44,8 +44,8 @@ export function verifyBundle(bundle) {
 
   const { bundleType, version, createdAt, snapshot, certificateHash, inputHash, outputHash } = bundle;
 
-  if (!bundleType || bundleType !== "cer.ai.execution.v1") {
-    errors.push(`Invalid bundleType: expected "cer.ai.execution.v1", got "${bundleType}"`);
+  if (!bundleType || typeof bundleType !== "string") {
+    errors.push("bundleType is required and must be a string");
   }
 
   if (!version || typeof version !== "string") {

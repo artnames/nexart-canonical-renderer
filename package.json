@@ -8,6 +8,7 @@
     "start": "node src/server.js"
   },
   "dependencies": {
+    "@nexart/ai-execution": "^0.1.0",
     "@nexart/codemode-sdk": "1.8.4",
     "canvas": "^3.2.0",
     "cors": "^2.8.5",

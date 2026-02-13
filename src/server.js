@@ -7,6 +7,7 @@ import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
 import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool } from "./db.js";
 import { verifyBundle, computeAttestationHash, sha256, canonicalJson } from "./attest.js";
+import { verifyCer } from "@nexart/ai-execution";
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
   createP5Runtime,
@@ -404,7 +405,10 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
   }
 });
 
-// ========== /api/attest - AI CER Attestation ==========
+// ========== /api/attest - CER Bundle Attestation ==========
+// Supports two bundle types:
+//   1. Code Mode bundles (existing behavior, raw hex hashes)
+//   2. AI Execution CER bundles (bundleType === "cer.ai.execution.v1", sha256:… hashes)
 app.post("/api/attest", apiKeyAuth, async (req, res) => {
   const startTime = req.startTime || Date.now();
   const requestId = crypto.randomUUID();
@@ -459,6 +463,79 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
       });
     }
 
+    const isAiCer = bundle.bundleType === "cer.ai.execution.v1";
+
+    // ========== Node runtime hash (shared by both paths) ==========
+    const nodeRuntimeHash = sha256(canonicalJson({
+      node: "nexart-canonical",
+      version: NODE_VERSION,
+      sdk_version: SDK_VERSION,
+      instance_id: INSTANCE_ID
+    }));
+
+    const attestedAt = new Date().toISOString();
+
+    if (isAiCer) {
+      // ========== AI Execution CER path ==========
+      const result = verifyCer(bundle);
+
+      if (!result.ok) {
+        res.set("X-Quota-Limit", String(quota.limit));
+        res.set("X-Quota-Used", String(quota.used));
+        res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining)));
+
+        logUsageEvent({
+          apiKeyId: req.apiKey?.id || null,
+          endpoint: "/api/attest",
+          statusCode: 400,
+          durationMs: Date.now() - startTime,
+          error: "INVALID_BUNDLE"
+        });
+
+        return res.status(400).json({
+          error: "INVALID_BUNDLE",
+          details: result.errors
+        });
+      }
+
+      const attestationHash = computeAttestationHash({
+        certificateHash: bundle.certificateHash,
+        nodeRuntimeHash,
+        protocolVersion: DEFAULT_PROTOCOL_VERSION,
+        attestedAt
+      });
+
+      res.set("X-Quota-Limit", String(quota.limit));
+      res.set("X-Quota-Used", String(quota.used + 1));
+      res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining - 1)));
+
+      logUsageEvent({
+        apiKeyId: req.apiKey?.id || null,
+        endpoint: "/api/attest",
+        statusCode: 200,
+        durationMs: Date.now() - startTime,
+        error: null
+      });
+
+      return res.json({
+        ok: true,
+        bundleType: bundle.bundleType,
+        certificateHash: bundle.certificateHash,
+        attestation: {
+          attestedAt,
+          attestationId: requestId,
+          bundleType: bundle.bundleType,
+          certificateHash: bundle.certificateHash,
+          nodeRuntimeHash,
+          protocolVersion: DEFAULT_PROTOCOL_VERSION,
+          requestId,
+          verified: true,
+          checks: ["snapshot_hashes", "certificate_hash"]
+        }
+      });
+    }
+
+    // ========== Code Mode bundle path (existing behavior) ==========
     const verification = verifyBundle(bundle);
 
     if (!verification.valid) {
@@ -481,16 +558,6 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
       });
     }
 
-    // ========== Attestation ==========
-    const nodeRuntimeHash = sha256(canonicalJson({
-      node: "nexart-canonical",
-      version: NODE_VERSION,
-      sdk_version: SDK_VERSION,
-      instance_id: INSTANCE_ID
-    }));
-
-    const attestedAt = new Date().toISOString();
-
     const attestationHash = computeAttestationHash({
       certificateHash: verification.certificateHash,
       nodeRuntimeHash,
@@ -498,7 +565,6 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
       attestedAt
     });
 
-    // Quota headers (used + 1 since this attest counts)
     res.set("X-Quota-Limit", String(quota.limit));
     res.set("X-Quota-Used", String(quota.used + 1));
     res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining - 1)));
@@ -513,12 +579,20 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
 
     return res.json({
       ok: true,
+      bundleType: bundle.bundleType || "codemode",
       certificateHash: verification.certificateHash,
-      attestationHash,
-      nodeRuntimeHash,
-      protocolVersion: DEFAULT_PROTOCOL_VERSION,
-      attestedAt,
-      requestId
+      attestation: {
+        attestedAt,
+        attestationId: requestId,
+        bundleType: bundle.bundleType || "codemode",
+        certificateHash: verification.certificateHash,
+        attestationHash,
+        nodeRuntimeHash,
+        protocolVersion: DEFAULT_PROTOCOL_VERSION,
+        requestId,
+        verified: true,
+        checks: ["input_hash", "certificate_hash"]
+      }
     });
   } catch (error) {
     console.error("[ATTEST] Error:", error.message);

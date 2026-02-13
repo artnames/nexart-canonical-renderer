@@ -11,14 +11,14 @@ function sha256(data) {
   return crypto.createHash("sha256").update(data).digest("hex");
 }
 
-function makeValidBundle() {
+function makeValidCodeModeBundle() {
   const snapshot = {
     code: "function setup() { background(100); }",
     seed: "test-seed-123",
     vars: [50, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   };
 
-  const bundleType = "cer.ai.execution.v1";
+  const bundleType = "cer.codemode.v1";
   const version = "1.0.0";
   const createdAt = "2025-01-01T00:00:00.000Z";
 
@@ -35,8 +35,34 @@ function makeValidBundle() {
   };
 }
 
-async function createTestApiKey() {
-  const apiKey = `test-attest-key-${Date.now()}`;
+const AI_CER_FIXTURE = {
+  bundleType: "cer.ai.execution.v1",
+  certificateHash: "sha256:1dc840c0b72bf39ebb0f9ed63cfdab76b581c3cdaf55f5b8276ded49b364e52d",
+  createdAt: "2026-02-13T13:13:33.112Z",
+  version: "0.1",
+  snapshot: {
+    type: "ai.execution.v1",
+    protocolVersion: "1.2.0",
+    executionSurface: "ai",
+    executionId: "exec_c7093dd242d4b87c",
+    timestamp: "2026-02-13T13:13:33.111Z",
+    provider: "openai",
+    model: "gpt-4o",
+    modelVersion: null,
+    prompt: "You are a helpful assistant.",
+    input: "Summarize the key risks in Q4 earnings.",
+    inputHash: "sha256:92404e9f72809c9b7f81aaa976825e71d17e70da2633a7258d72e54ba46bd60e",
+    parameters: { temperature: 0, maxTokens: 1024, topP: null, seed: null },
+    output: "Key risks identified: (1) Revenue contraction of 12% YoY, (2) Margin pressure from increased operating costs, (3) Regulatory uncertainty in EU markets.",
+    outputHash: "sha256:fb45b106fcf36c557672c39eecffd44e77e55176a92756429d341ac571211293",
+    sdkVersion: "0.1.0",
+    appId: "nexart.io-demo"
+  },
+  meta: { source: "nexart.io", tags: ["demo"] }
+};
+
+async function createTestApiKey(userSuffix = 'attest') {
+  const apiKey = `test-${userSuffix}-key-${Date.now()}`;
   const keyHash = sha256(apiKey);
 
   const dbUrl = process.env.DATABASE_URL;
@@ -45,16 +71,18 @@ async function createTestApiKey() {
   const pg = await import('pg');
   const pool = new pg.default.Pool({ connectionString: dbUrl });
 
+  const userId = `test-${userSuffix}-user`;
+
   await pool.query(`
     INSERT INTO accounts (user_id, monthly_limit)
     VALUES ($1, $2)
     ON CONFLICT (user_id) DO UPDATE SET monthly_limit = $2
-  `, ['test-attest-user', 100]);
+  `, [userId, 100]);
 
   await pool.query(`
     INSERT INTO api_keys (key_hash, label, plan, status, monthly_limit, user_id)
     VALUES ($1, $2, $3, $4, $5, $6)
-  `, [keyHash, 'test-attest', 'free', 'active', 100, 'test-attest-user']);
+  `, [keyHash, `test-${userSuffix}`, 'free', 'active', 100, userId]);
 
   await pool.end();
   return apiKey;
@@ -90,15 +118,15 @@ async function createQuotaExhaustedApiKey() {
   return apiKey;
 }
 
-describe('POST /api/attest', () => {
+describe('POST /api/attest - Code Mode bundles', () => {
   let apiKey;
 
   beforeAll(async () => {
-    apiKey = await createTestApiKey();
+    apiKey = await createTestApiKey('codemode-attest');
   });
 
-  it('should return attestation for a valid bundle', async () => {
-    const bundle = makeValidBundle();
+  it('should return attestation for a valid Code Mode bundle', async () => {
+    const bundle = makeValidCodeModeBundle();
 
     const response = await fetch(`${BASE_URL}/api/attest`, {
       method: 'POST',
@@ -114,12 +142,14 @@ describe('POST /api/attest', () => {
     const data = await response.json();
     expect(data.ok).toBe(true);
     expect(data.certificateHash).toBe(bundle.certificateHash);
-    expect(data.attestationHash).toBeTruthy();
-    expect(data.attestationHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(data.nodeRuntimeHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(data.protocolVersion).toBeTruthy();
-    expect(data.attestedAt).toBeTruthy();
-    expect(data.requestId).toBeTruthy();
+    expect(data.attestation).toBeDefined();
+    expect(data.attestation.attestedAt).toBeTruthy();
+    expect(data.attestation.attestationId).toBeTruthy();
+    expect(data.attestation.attestationHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(data.attestation.nodeRuntimeHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(data.attestation.protocolVersion).toBeTruthy();
+    expect(data.attestation.requestId).toBeTruthy();
+    expect(data.attestation.verified).toBe(true);
 
     expect(response.headers.get('X-Quota-Limit')).toBeTruthy();
     expect(response.headers.get('X-Quota-Used')).toBeTruthy();
@@ -127,7 +157,7 @@ describe('POST /api/attest', () => {
   });
 
   it('should return 400 for tampered certificateHash', async () => {
-    const bundle = makeValidBundle();
+    const bundle = makeValidCodeModeBundle();
     bundle.certificateHash = 'a'.repeat(64);
 
     const response = await fetch(`${BASE_URL}/api/attest`, {
@@ -149,7 +179,7 @@ describe('POST /api/attest', () => {
   });
 
   it('should return 400 for tampered inputHash', async () => {
-    const bundle = makeValidBundle();
+    const bundle = makeValidCodeModeBundle();
     bundle.inputHash = 'b'.repeat(64);
 
     const response = await fetch(`${BASE_URL}/api/attest`, {
@@ -170,7 +200,7 @@ describe('POST /api/attest', () => {
   });
 
   it('should return 400 for invalid hash format', async () => {
-    const bundle = makeValidBundle();
+    const bundle = makeValidCodeModeBundle();
     bundle.certificateHash = 'not-a-valid-hash';
 
     const response = await fetch(`${BASE_URL}/api/attest`, {
@@ -197,7 +227,7 @@ describe('POST /api/attest', () => {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify({ bundleType: "cer.ai.execution.v1" })
+      body: JSON.stringify({ bundleType: "cer.codemode.v1" })
     });
 
     expect(response.status).toBe(400);
@@ -206,7 +236,7 @@ describe('POST /api/attest', () => {
   });
 
   it('should return 401 without auth', async () => {
-    const bundle = makeValidBundle();
+    const bundle = makeValidCodeModeBundle();
 
     const response = await fetch(`${BASE_URL}/api/attest`, {
       method: 'POST',
@@ -219,7 +249,7 @@ describe('POST /api/attest', () => {
 
   it('should return 429 when quota exceeded', async () => {
     const exhaustedKey = await createQuotaExhaustedApiKey();
-    const bundle = makeValidBundle();
+    const bundle = makeValidCodeModeBundle();
 
     const response = await fetch(`${BASE_URL}/api/attest`, {
       method: 'POST',
@@ -237,5 +267,111 @@ describe('POST /api/attest', () => {
     expect(response.headers.get('X-Quota-Limit')).toBeTruthy();
     expect(response.headers.get('X-Quota-Used')).toBeTruthy();
     expect(response.headers.get('X-Quota-Remaining')).toBe('0');
+  });
+});
+
+describe('POST /api/attest - AI CER bundles', () => {
+  let apiKey;
+
+  beforeAll(async () => {
+    apiKey = await createTestApiKey('ai-cer-attest');
+  });
+
+  it('should return 200 for a valid AI CER bundle', async () => {
+    const response = await fetch(`${BASE_URL}/api/attest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(AI_CER_FIXTURE)
+    });
+
+    expect(response.status).toBe(200);
+
+    const data = await response.json();
+    expect(data.ok).toBe(true);
+    expect(data.bundleType).toBe('cer.ai.execution.v1');
+    expect(data.certificateHash).toBe(AI_CER_FIXTURE.certificateHash);
+
+    expect(data.attestation).toBeDefined();
+    expect(data.attestation.attestedAt).toBeTruthy();
+    expect(data.attestation.attestationId).toBeTruthy();
+    expect(data.attestation.bundleType).toBe('cer.ai.execution.v1');
+    expect(data.attestation.certificateHash).toBe(AI_CER_FIXTURE.certificateHash);
+    expect(data.attestation.nodeRuntimeHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(data.attestation.protocolVersion).toBeTruthy();
+    expect(data.attestation.requestId).toBeTruthy();
+    expect(data.attestation.verified).toBe(true);
+    expect(data.attestation.checks).toContain('snapshot_hashes');
+    expect(data.attestation.checks).toContain('certificate_hash');
+
+    expect(response.headers.get('X-Quota-Limit')).toBeTruthy();
+    expect(response.headers.get('X-Quota-Used')).toBeTruthy();
+    expect(response.headers.get('X-Quota-Remaining')).toBeTruthy();
+  });
+
+  it('should return 400 for tampered AI CER output', async () => {
+    const tampered = JSON.parse(JSON.stringify(AI_CER_FIXTURE));
+    tampered.snapshot.output = "TAMPERED OUTPUT";
+
+    const response = await fetch(`${BASE_URL}/api/attest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(tampered)
+    });
+
+    expect(response.status).toBe(400);
+
+    const data = await response.json();
+    expect(data.error).toBe('INVALID_BUNDLE');
+    expect(data.details).toBeDefined();
+    expect(Array.isArray(data.details)).toBe(true);
+    expect(data.details.length).toBeGreaterThan(0);
+  });
+
+  it('should return 400 for invalid AI CER certificateHash format', async () => {
+    const bad = JSON.parse(JSON.stringify(AI_CER_FIXTURE));
+    bad.certificateHash = "not-a-valid-hash";
+
+    const response = await fetch(`${BASE_URL}/api/attest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(bad)
+    });
+
+    expect(response.status).toBe(400);
+
+    const data = await response.json();
+    expect(data.error).toBe('INVALID_BUNDLE');
+    expect(data.details).toBeDefined();
+    expect(data.details.some(d => d.includes('certificateHash'))).toBe(true);
+  });
+
+  it('should return 400 for tampered AI CER certificateHash', async () => {
+    const tampered = JSON.parse(JSON.stringify(AI_CER_FIXTURE));
+    tampered.certificateHash = "sha256:" + "a".repeat(64);
+
+    const response = await fetch(`${BASE_URL}/api/attest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(tampered)
+    });
+
+    expect(response.status).toBe(400);
+
+    const data = await response.json();
+    expect(data.error).toBe('INVALID_BUNDLE');
+    expect(data.details).toBeDefined();
+    expect(data.details.some(d => d.includes('certificateHash'))).toBe(true);
   });
 });
