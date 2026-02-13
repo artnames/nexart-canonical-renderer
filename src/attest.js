@@ -30,6 +30,41 @@ export function computeOutputHash(outputs) {
 }
 
 const SHA256_HEX_RE = /^[a-f0-9]{64}$/;
+const SHA256_PREFIXED_RE = /^sha256:[a-f0-9]{64}$/;
+
+export function validateAiCerBundle(bundle) {
+  const errors = [];
+
+  if (!bundle || typeof bundle !== "object") {
+    return ["bundle is required and must be an object"];
+  }
+
+  if (bundle.bundleType !== "cer.ai.execution.v1") {
+    errors.push(`bundleType must be "cer.ai.execution.v1", got "${bundle.bundleType}"`);
+  }
+
+  if (!bundle.version || typeof bundle.version !== "string") {
+    errors.push("version is required and must be a string (e.g. \"0.1\")");
+  }
+
+  if (!bundle.createdAt || typeof bundle.createdAt !== "string") {
+    errors.push("createdAt is required and must be an ISO date string");
+  } else if (isNaN(Date.parse(bundle.createdAt))) {
+    errors.push(`createdAt is not a valid ISO date: "${bundle.createdAt}"`);
+  }
+
+  if (!bundle.certificateHash || typeof bundle.certificateHash !== "string") {
+    errors.push("certificateHash is required");
+  } else if (!SHA256_PREFIXED_RE.test(bundle.certificateHash)) {
+    errors.push(`certificateHash must match sha256:<64-hex-chars>, got "${bundle.certificateHash}"`);
+  }
+
+  if (!bundle.snapshot || typeof bundle.snapshot !== "object") {
+    errors.push("snapshot is required and must be an object");
+  }
+
+  return errors;
+}
 
 export function isValidSha256(hash) {
   return typeof hash === "string" && SHA256_HEX_RE.test(hash);

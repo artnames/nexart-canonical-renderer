@@ -374,4 +374,80 @@ describe('POST /api/attest - AI CER bundles', () => {
     expect(data.details).toBeDefined();
     expect(data.details.some(d => d.includes('certificateHash'))).toBe(true);
   });
+
+  it('should return 400 (not 500) for missing version', async () => {
+    const bad = JSON.parse(JSON.stringify(AI_CER_FIXTURE));
+    delete bad.version;
+
+    const response = await fetch(`${BASE_URL}/api/attest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(bad)
+    });
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toBe('INVALID_BUNDLE');
+    expect(data.details.some(d => d.includes('version'))).toBe(true);
+  });
+
+  it('should return 400 (not 500) for missing createdAt', async () => {
+    const bad = JSON.parse(JSON.stringify(AI_CER_FIXTURE));
+    delete bad.createdAt;
+
+    const response = await fetch(`${BASE_URL}/api/attest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(bad)
+    });
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toBe('INVALID_BUNDLE');
+    expect(data.details.some(d => d.includes('createdAt'))).toBe(true);
+  });
+
+  it('should return 400 (not 500) for missing snapshot', async () => {
+    const bad = JSON.parse(JSON.stringify(AI_CER_FIXTURE));
+    delete bad.snapshot;
+
+    const response = await fetch(`${BASE_URL}/api/attest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(bad)
+    });
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toBe('INVALID_BUNDLE');
+    expect(data.details.some(d => d.includes('snapshot'))).toBe(true);
+  });
+
+  it('should return 400 (not 500) for bad certificateHash format', async () => {
+    const bad = JSON.parse(JSON.stringify(AI_CER_FIXTURE));
+    bad.certificateHash = "badhash";
+
+    const response = await fetch(`${BASE_URL}/api/attest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(bad)
+    });
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toBe('INVALID_BUNDLE');
+    expect(data.details.some(d => d.includes('certificateHash'))).toBe(true);
+  });
 });

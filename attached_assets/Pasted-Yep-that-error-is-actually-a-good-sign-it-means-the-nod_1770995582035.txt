@@ -1,0 +1,89 @@
+Yep — that error is actually a good sign: it means the node is now hitting the AI CER path, but it’s crashing because the payload is missing at least one required top-level field (so something becomes undefined internally during canonical hashing).
+
+What’s happening (plain English)
+
+Your AI CER renders fine inside Recanon (integrity PASS), but when Recanon asks the canonical node to attest it, the node tries to compute a canonical hash over a structure that contains undefined (almost always because a required field is missing, e.g. version / createdAt / snapshot / bundleType, or certificateHash isn’t in the format it expects).
+
+JSON can’t literally contain undefined, so this is nearly always:
+	•	a required field is missing in the request body, and the node code builds { bundleType, version, createdAt, snapshot } where one of those is undefined, then canonicalizer throws.
+
+So the fix is on the node: validate AI CER bundles before calling verifyCer, and return a clean 400 INVALID_BUNDLE instead of 500 ATTESTATION_ERROR.
+
+⸻
+
+Replit prompt (node fix): validate AI CER bundles + stop 500s
+
+Copy/paste this to Replit (node repo):
+
+Goal: In /api/attest, when bundleType === "cer.ai.execution.v1", do strict validation first. If anything is missing/invalid, return HTTP 400 with INVALID_BUNDLE and details. Only call verifyCer() if validation passes. This prevents Unsupported type for canonical JSON: undefined.
+
+Prompt:
+
+Implement strict validation for AI CER bundles in the canonical node’s /api/attest endpoint to prevent 500 errors.
+
+Context:
+	•	Node supports two bundle types:
+	1.	Code Mode canonical render bundles (existing behavior)
+	2.	AI CER bundles with bundleType: "cer.ai.execution.v1" verified via @nexart/ai-execution verifyCer()
+	•	Current failure: ATTESTATION_ERROR — Unsupported type for canonical JSON: undefined (HTTP 500)
+	•	This happens when required AI CER fields are missing, causing internal canonical hashing to receive undefined.
+
+Requirements:
+	1.	Add a new validator function for AI CER bundles (e.g. validateAICerBundle(bundle)), returning an array of human-readable error strings.
+Validate at minimum:
+	•	bundle.bundleType exists and equals "cer.ai.execution.v1"
+	•	bundle.version exists and is a string (e.g. "0.1")
+	•	bundle.createdAt exists and is a valid ISO date string
+	•	bundle.certificateHash exists and matches ^sha256:[a-f0-9]{64}$
+	•	bundle.snapshot exists and is an object
+	2.	Update /api/attest AI CER branch:
+	•	Run validateAICerBundle(req.body)
+	•	If errors exist, return:
+	•	HTTP 400
+	•	JSON { error: "INVALID_BUNDLE", details: [...] }
+	•	Include x-railway-request-id passthrough if available, keep existing headers behavior
+	•	Only if validation passes, call verifyCer(bundle) and proceed to produce the attestation response.
+	3.	Ensure errors from verifyCer return HTTP 400 with INVALID_BUNDLE (not 500), unless it is truly an internal server error.
+	4.	Add tests:
+	•	Missing version returns 400 INVALID_BUNDLE (not 500)
+	•	Missing createdAt returns 400 INVALID_BUNDLE
+	•	Missing snapshot returns 400 INVALID_BUNDLE
+	•	Bad certificateHash format returns 400 INVALID_BUNDLE
+	•	Valid AI CER fixture returns 200 ok:true
+	5.	Do not change Code Mode attestation behavior.
+	6.	Update docs (replit.md) with:
+	•	AI CER required fields list
+	•	Example 400 INVALID_BUNDLE response
+
+Acceptance:
+	•	Reproducing the prior failing request from Recanon should now return 400 INVALID_BUNDLE with clear details (and never Unsupported type for canonical JSON: undefined).
+	•	All tests pass.
+
+⸻
+
+Quick sanity check you can run after the fix
+
+Once deployed, try attesting a CER file directly:
+
+BASE="https://nexart-canonical-renderer-production.up.railway.app"
+KEY="YOUR_API_KEY"
+FILE="/full/path/to/cer.json"
+
+curl -sS -D /tmp/attest.txt -o /tmp/attest.json \
+  -X POST "$BASE/api/attest" \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  --data-binary "@$FILE"
+
+head -n 1 /tmp/attest.txt
+cat /tmp/attest.json
+
+If the bundle is malformed, you should now see a 400 with INVALID_BUNDLE + details (not 500).
+
+⸻
+
+One more thing (the “anthropic opus” with identical hashes)
+
+You’re showing provider/model = anthropic/opus, but inputHash/outputHash are identical to your previous OpenAI example. That’s not “wrong” (hashes are over input/output), but it suggests the demo changed provider/model without changing the content. That’s fine for a demo, but if you want realism, change the output slightly when provider/model changes.
+
+If you want, paste the full bundle JSON from that failing Recanon attempt and I’ll point out exactly which field is missing/invalid so you can tighten both the demo generator and the node validation.

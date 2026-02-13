@@ -6,7 +6,7 @@ import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
 import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool } from "./db.js";
-import { verifyBundle, computeAttestationHash, sha256, canonicalJson } from "./attest.js";
+import { verifyBundle, validateAiCerBundle, computeAttestationHash, sha256, canonicalJson } from "./attest.js";
 import { verifyCer } from "@nexart/ai-execution";
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
@@ -481,7 +481,47 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
 
     if (isAiCer) {
       // ========== AI Execution CER path ==========
-      const result = verifyCer(bundle);
+      const validationErrors = validateAiCerBundle(bundle);
+      if (validationErrors.length > 0) {
+        res.set("X-Quota-Limit", String(quota.limit));
+        res.set("X-Quota-Used", String(quota.used));
+        res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining)));
+
+        logUsageEvent({
+          apiKeyId: req.apiKey?.id || null,
+          endpoint: "/api/attest",
+          statusCode: 400,
+          durationMs: Date.now() - startTime,
+          error: "INVALID_BUNDLE"
+        });
+
+        return res.status(400).json({
+          error: "INVALID_BUNDLE",
+          details: validationErrors
+        });
+      }
+
+      let result;
+      try {
+        result = verifyCer(bundle);
+      } catch (verifyError) {
+        res.set("X-Quota-Limit", String(quota.limit));
+        res.set("X-Quota-Used", String(quota.used));
+        res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining)));
+
+        logUsageEvent({
+          apiKeyId: req.apiKey?.id || null,
+          endpoint: "/api/attest",
+          statusCode: 400,
+          durationMs: Date.now() - startTime,
+          error: "INVALID_BUNDLE"
+        });
+
+        return res.status(400).json({
+          error: "INVALID_BUNDLE",
+          details: [verifyError.message || "Bundle verification failed"]
+        });
+      }
 
       if (!result.ok) {
         res.set("X-Quota-Limit", String(quota.limit));

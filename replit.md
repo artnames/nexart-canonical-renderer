@@ -224,10 +224,33 @@ Content-Type: application/json
 }
 ```
 
+### AI CER Required Fields
+
+The following fields are validated before `verifyCer()` is called. Missing or malformed fields return `400 INVALID_BUNDLE` with a `details` array:
+
+| Field | Requirement |
+|-------|-------------|
+| `bundleType` | Must equal `"cer.ai.execution.v1"` |
+| `version` | Required, string (e.g. `"0.1"`) |
+| `createdAt` | Required, valid ISO date string |
+| `certificateHash` | Required, format `sha256:<64-hex-chars>` |
+| `snapshot` | Required, must be an object |
+
 ### Error Responses
 - **400** `INVALID_BUNDLE` — Bundle validation failed (mismatched hashes, missing fields, invalid format). Returns `details` array with readable error messages.
 - **401** `UNAUTHORIZED` — Missing or invalid API key
 - **429** `QUOTA_EXCEEDED` — Monthly quota exceeded (attestations share quota with renders)
+
+Example 400 response (missing fields):
+```json
+{
+  "error": "INVALID_BUNDLE",
+  "details": [
+    "version is required and must be a string (e.g. \"0.1\")",
+    "createdAt is required and must be an ISO date string"
+  ]
+}
+```
 
 ### Quota
 Successful attestations count toward the same monthly quota as `/api/render`. Response includes `X-Quota-Limit`, `X-Quota-Used`, `X-Quota-Remaining` headers.
@@ -298,7 +321,7 @@ Content-Type: application/json
 
 ## Version Info
 
-- Service Version: from `package.json` (currently 0.2.0)
+- Service Version: from `package.json` (currently 0.2.1)
 - SDK Version: 1.8.4
 - Protocol Version: 1.2.0
 - Service Build: git SHA (from `GIT_SHA` or `RAILWAY_GIT_COMMIT_SHA` env, otherwise "unknown")
@@ -372,7 +395,7 @@ Expected `/version` output:
 ```json
 {
   "service": "nexart-node",
-  "serviceVersion": "0.2.0",
+  "serviceVersion": "0.2.1",
   "sdkVersion": "1.8.4",
   "sdkDependency": "1.8.4",
   "protocolVersion": "1.2.0",
@@ -387,7 +410,7 @@ Expected `/health` output:
 {
   "status": "ok",
   "node": "nexart-canonical",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "sdk_version": "1.8.4",
   "protocol_version": "1.2.0",
   "instance_id": "<hostname>",
