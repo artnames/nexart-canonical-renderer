@@ -321,7 +321,7 @@ Content-Type: application/json
 
 ## Version Info
 
-- Service Version: from `package.json` (currently 0.2.1)
+- Service Version: from `package.json` (currently 0.2.2)
 - SDK Version: 1.8.4
 - Protocol Version: 1.2.0
 - Service Build: git SHA (from `GIT_SHA` or `RAILWAY_GIT_COMMIT_SHA` env, otherwise "unknown")
@@ -395,7 +395,7 @@ Expected `/version` output:
 ```json
 {
   "service": "nexart-node",
-  "serviceVersion": "0.2.1",
+  "serviceVersion": "0.2.2",
   "sdkVersion": "1.8.4",
   "sdkDependency": "1.8.4",
   "protocolVersion": "1.2.0",
@@ -410,7 +410,7 @@ Expected `/health` output:
 {
   "status": "ok",
   "node": "nexart-canonical",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "sdk_version": "1.8.4",
   "protocol_version": "1.2.0",
   "instance_id": "<hostname>",

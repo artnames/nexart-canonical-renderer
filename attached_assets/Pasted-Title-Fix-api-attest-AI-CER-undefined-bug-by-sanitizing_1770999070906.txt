@@ -1,0 +1,59 @@
+Title: Fix /api/attest AI CER undefined bug by sanitizing payload + avoiding undefined injection
+
+Prompt:
+
+We still get: INVALID_BUNDLE: Unsupported type for canonical JSON: undefined when attesting valid cer.ai.execution.v1 bundles from recanon/nexart.io.
+
+This implies the node is introducing undefined in JS (JSON payload cannot contain undefined). Likely we reconstruct the bundle like {..., meta } where meta is undefined.
+
+Please implement the following in the canonical node repo:
+
+1) Add a shared sanitization helper (server-side)
+
+Create src/sanitize.js (or similar) with:
+	•	removeUndefinedDeep(value):
+	•	if array: map items, convert undefined to null
+	•	if object: omit keys whose values are undefined
+	•	recursively sanitize nested structures
+	•	leave null, strings, numbers, booleans as-is
+
+Also add findUndefinedPaths(obj) for debug logging (optional but useful).
+
+2) Patch /api/attest AI CER path
+
+In src/server.js inside the /api/attest handler, for AI CER (bundleType === "cer.ai.execution.v1"):
+	•	Do NOT reconstruct the bundle by picking fields into a new object unless you conditionally include optionals.
+	•	Instead:
+	•	const incoming = req.body
+	•	const cleaned = removeUndefinedDeep(incoming)
+	•	(optional) if findUndefinedPaths(cleaned).length > 0, return 400 INVALID_BUNDLE with the paths (but ideally it should be 0 always)
+	•	Pass cleaned into verifyCer(cleaned) from @nexart/ai-execution
+
+If we still need to strip sensitive fields on the node (input/output/prompt), use delete (not assignment to undefined), then run removeUndefinedDeep() afterward.
+
+3) Ensure meta handling cannot inject undefined
+
+If you must build an object (not preferred), only attach optionals if defined:
+	•	if (incoming.meta !== undefined) bundle.meta = incoming.meta;
+Same for modelVersion, topP, seed, etc. (but these should be null or omitted, never undefined)
+
+4) Tests
+
+Update/add tests in tests/attest.test.js:
+	•	New test: valid AI CER bundle WITHOUT meta should attest OK (no undefined error)
+	•	New test: AI CER bundle with meta: undefined (constructed in test code, not JSON) should be sanitized and still attest OK
+	•	Keep existing Code Mode tests passing
+
+5) Response + error codes
+
+If sanitization finds undefined paths, return:
+400 { error:"INVALID_BUNDLE", details:[ "Unsupported type for canonical JSON: undefined at <paths...>" ] }
+But the primary goal is to prevent this from happening.
+
+6) Version bump + deploy note
+
+Bump node version (package.json) from 0.2.1 to 0.2.2 (patch).
+Confirm /health and /version show 0.2.2.
+Provide a curl example that succeeds with a real AI CER JSON file.
+
+Do not change Code Mode protocol or verification behavior.

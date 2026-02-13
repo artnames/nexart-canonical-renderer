@@ -7,6 +7,7 @@ import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
 import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool } from "./db.js";
 import { verifyBundle, validateAiCerBundle, computeAttestationHash, sha256, canonicalJson } from "./attest.js";
+import { removeUndefinedDeep } from "./sanitize.js";
 import { verifyCer } from "@nexart/ai-execution";
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
@@ -481,7 +482,9 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
 
     if (isAiCer) {
       // ========== AI Execution CER path ==========
-      const validationErrors = validateAiCerBundle(bundle);
+      const cleaned = removeUndefinedDeep(bundle);
+
+      const validationErrors = validateAiCerBundle(cleaned);
       if (validationErrors.length > 0) {
         res.set("X-Quota-Limit", String(quota.limit));
         res.set("X-Quota-Used", String(quota.used));
@@ -503,7 +506,7 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
 
       let result;
       try {
-        result = verifyCer(bundle);
+        result = verifyCer(cleaned);
       } catch (verifyError) {
         res.set("X-Quota-Limit", String(quota.limit));
         res.set("X-Quota-Used", String(quota.used));
@@ -543,7 +546,7 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
       }
 
       const attestationHash = computeAttestationHash({
-        certificateHash: bundle.certificateHash,
+        certificateHash: cleaned.certificateHash,
         nodeRuntimeHash,
         protocolVersion: DEFAULT_PROTOCOL_VERSION,
         attestedAt
@@ -563,13 +566,13 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
 
       return res.json({
         ok: true,
-        bundleType: bundle.bundleType,
-        certificateHash: bundle.certificateHash,
+        bundleType: cleaned.bundleType,
+        certificateHash: cleaned.certificateHash,
         attestation: {
           attestedAt,
           attestationId: requestId,
-          bundleType: bundle.bundleType,
-          certificateHash: bundle.certificateHash,
+          bundleType: cleaned.bundleType,
+          certificateHash: cleaned.certificateHash,
           nodeRuntimeHash,
           protocolVersion: DEFAULT_PROTOCOL_VERSION,
           requestId,

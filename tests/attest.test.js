@@ -450,4 +450,41 @@ describe('POST /api/attest - AI CER bundles', () => {
     expect(data.error).toBe('INVALID_BUNDLE');
     expect(data.details.some(d => d.includes('certificateHash'))).toBe(true);
   });
+
+  it('should attest OK when meta field is absent', async () => {
+    const noMeta = JSON.parse(JSON.stringify(AI_CER_FIXTURE));
+    delete noMeta.meta;
+
+    const response = await fetch(`${BASE_URL}/api/attest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(noMeta)
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.ok).toBe(true);
+    expect(data.bundleType).toBe('cer.ai.execution.v1');
+  });
+
+  it('should handle null optional fields without crashing', async () => {
+    const withNulls = JSON.parse(JSON.stringify(AI_CER_FIXTURE));
+    withNulls.meta = null;
+
+    const response = await fetch(`${BASE_URL}/api/attest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(withNulls)
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.ok).toBe(true);
+  });
 });
