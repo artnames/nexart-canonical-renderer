@@ -6,6 +6,7 @@ import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
 import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool } from "./db.js";
+import { verifyBundle, computeAttestationHash, sha256, canonicalJson } from "./attest.js";
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
   createP5Runtime,
@@ -399,6 +400,140 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     res.json({
       error: "RENDER_ERROR",
       message: error.message,
+    });
+  }
+});
+
+// ========== /api/attest - AI CER Attestation ==========
+app.post("/api/attest", apiKeyAuth, async (req, res) => {
+  const startTime = req.startTime || Date.now();
+  const requestId = crypto.randomUUID();
+
+  try {
+    // ========== Quota enforcement (same as /api/render) ==========
+    const userId = req.apiKey?.userId;
+    const quota = await getAccountQuota(userId);
+
+    if (quota.enforced === false) {
+      res.set("X-Quota-Enforced", "false");
+    }
+
+    if (quota.exceeded) {
+      const resetAt = await getQuotaResetDate();
+      res.set("X-Quota-Limit", String(quota.limit));
+      res.set("X-Quota-Used", String(quota.used));
+      res.set("X-Quota-Remaining", "0");
+
+      logUsageEvent({
+        apiKeyId: req.apiKey?.id || null,
+        endpoint: "/api/attest",
+        statusCode: 429,
+        durationMs: Date.now() - startTime,
+        error: "QUOTA_EXCEEDED"
+      });
+
+      return res.status(429).json({
+        error: "QUOTA_EXCEEDED",
+        message: "Monthly certified run quota exceeded",
+        limit: quota.limit,
+        used: quota.used,
+        resetAt
+      });
+    }
+
+    // ========== Bundle validation ==========
+    const bundle = req.body;
+
+    if (!bundle || typeof bundle !== "object") {
+      logUsageEvent({
+        apiKeyId: req.apiKey?.id || null,
+        endpoint: "/api/attest",
+        statusCode: 400,
+        durationMs: Date.now() - startTime,
+        error: "INVALID_REQUEST"
+      });
+
+      return res.status(400).json({
+        error: "INVALID_REQUEST",
+        message: "Request body must be a CER bundle object"
+      });
+    }
+
+    const verification = verifyBundle(bundle);
+
+    if (!verification.valid) {
+      res.set("X-Quota-Limit", String(quota.limit));
+      res.set("X-Quota-Used", String(quota.used));
+      res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining)));
+
+      logUsageEvent({
+        apiKeyId: req.apiKey?.id || null,
+        endpoint: "/api/attest",
+        statusCode: 400,
+        durationMs: Date.now() - startTime,
+        error: "INVALID_BUNDLE"
+      });
+
+      return res.status(400).json({
+        error: "INVALID_BUNDLE",
+        details: verification.errors,
+        mismatches: verification.mismatches || undefined
+      });
+    }
+
+    // ========== Attestation ==========
+    const nodeRuntimeHash = sha256(canonicalJson({
+      node: "nexart-canonical",
+      version: NODE_VERSION,
+      sdk_version: SDK_VERSION,
+      instance_id: INSTANCE_ID
+    }));
+
+    const attestedAt = new Date().toISOString();
+
+    const attestationHash = computeAttestationHash({
+      certificateHash: verification.certificateHash,
+      nodeRuntimeHash,
+      protocolVersion: DEFAULT_PROTOCOL_VERSION,
+      attestedAt
+    });
+
+    // Quota headers (used + 1 since this attest counts)
+    res.set("X-Quota-Limit", String(quota.limit));
+    res.set("X-Quota-Used", String(quota.used + 1));
+    res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining - 1)));
+
+    logUsageEvent({
+      apiKeyId: req.apiKey?.id || null,
+      endpoint: "/api/attest",
+      statusCode: 200,
+      durationMs: Date.now() - startTime,
+      error: null
+    });
+
+    return res.json({
+      ok: true,
+      certificateHash: verification.certificateHash,
+      attestationHash,
+      nodeRuntimeHash,
+      protocolVersion: DEFAULT_PROTOCOL_VERSION,
+      attestedAt,
+      requestId
+    });
+  } catch (error) {
+    console.error("[ATTEST] Error:", error.message);
+
+    logUsageEvent({
+      apiKeyId: req.apiKey?.id || null,
+      endpoint: "/api/attest",
+      statusCode: 500,
+      durationMs: Date.now() - startTime,
+      error: error.message
+    });
+
+    return res.status(500).json({
+      error: "ATTESTATION_ERROR",
+      message: error.message
     });
   }
 });

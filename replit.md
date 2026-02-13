@@ -64,6 +64,7 @@ The SDK is imported via `createRequire()` workaround due to ESM compatibility is
 | `/version` | GET | Full version info (SDK, protocol, build) |
 | `/render` | POST | Execute snapshot (static or loop) |
 | `/api/render` | POST | CLI contract - static render (code, seed, VAR) |
+| `/api/attest` | POST | AI CER attestation (API key required) |
 | `/verify` | POST | Verify execution against expected hash |
 
 ## Render Endpoint
@@ -142,6 +143,51 @@ Content-Type: application/json
   }
 }
 ```
+
+## Attest Endpoint
+
+Provides integrity attestation for AI CER (Certified Execution Record) bundles. This endpoint verifies bundle integrity and returns a signed attestation — it does NOT execute renders or verify model determinism.
+
+### Request
+```json
+POST /api/attest
+Authorization: Bearer <api_key>
+Content-Type: application/json
+
+{
+  "bundleType": "cer.ai.execution.v1",
+  "version": "1.0.0",
+  "createdAt": "2025-01-01T00:00:00.000Z",
+  "snapshot": {
+    "code": "function setup() { background(100); }",
+    "seed": "unique-seed",
+    "vars": [50, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  },
+  "inputHash": "<sha256>",
+  "certificateHash": "<sha256>"
+}
+```
+
+### Success Response (200)
+```json
+{
+  "ok": true,
+  "certificateHash": "<sha256>",
+  "attestationHash": "<sha256>",
+  "nodeRuntimeHash": "<sha256>",
+  "protocolVersion": "1.2.0",
+  "attestedAt": "2025-01-01T00:00:00.000Z",
+  "requestId": "<uuid>"
+}
+```
+
+### Error Responses
+- **400** `INVALID_BUNDLE` — Bundle validation failed (mismatched hashes, missing fields, invalid format)
+- **401** `UNAUTHORIZED` — Missing or invalid API key
+- **429** `QUOTA_EXCEEDED` — Monthly quota exceeded (attestations share quota with renders)
+
+### Quota
+Successful attestations count toward the same monthly quota as `/api/render`. Response includes `X-Quota-Limit`, `X-Quota-Used`, `X-Quota-Remaining` headers.
 
 ## Verify Endpoint
 

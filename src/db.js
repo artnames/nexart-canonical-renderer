@@ -163,7 +163,7 @@ export async function getAccountQuota(userId) {
        FROM usage_events ue
        JOIN api_keys ak ON ue.api_key_id = ak.id
        WHERE ak.user_id = $1
-         AND ue.endpoint = '/api/render'
+         AND ue.endpoint IN ('/api/render', '/api/attest')
          AND ue.status_code >= 200 AND ue.status_code < 300
          AND ue.ts >= DATE_TRUNC('month', NOW())`,
       [userId]
