@@ -1,0 +1,96 @@
+TITLE: Harden canonical node for Recânon attestation (fix 502 “Application failed to respond”)
+
+Context
+- Recânon verify-by-JSON sometimes fails with:
+  NODE_ERROR / upstream 502 / “Application failed to respond” after ~5.4s
+- Railway logs show SIGTERM / container stops / “BadRequestError: request aborted”
+- This is NOT a bundle validation issue; it’s availability / restart / timeout behavior.
+- Node currently:
+  - express.json({ limit: "10mb" })
+  - /ready does DB ping & readiness logic
+  - /health always returns ok JSON
+  - /api/attest does verify + logUsageEvent + returns JSON, and then fire-and-forget CER ingestion
+  - Server has gracefulShutdown handlers
+
+Goal
+Make /api/attest reliably respond under 5 seconds and stop the node from “going dark” during deploy/health checks. Add diagnostics so we can prove where time is spent and why requests abort.
+
+DO THIS (required changes)
+
+1) Increase JSON body size limit safely
+- Change express.json limit from 10mb to 50mb (or 25mb minimum).
+- Reason: AI CER bundles may be larger and can trigger request aborts/timeouts.
+
+2) Add hard “fast path” for /api/attest to avoid long stalls
+- Add per-request timing marks inside /api/attest:
+  - t0 start
+  - after parsing/validation
+  - after verifyCer / verifyBundle
+  - after logUsageEvent
+  - before res.json
+- Log a single structured line when the request finishes:
+  [ATTEST] requestId=… bundleType=… ms_total=… ms_verify=… ms_db=… ms_ingest_enqueue=…
+- Ensure no network calls are awaited after verification besides the DB insert.
+- CER ingestion must remain fire-and-forget and must never delay response.
+
+3) Prevent “mystery crashes” from killing responses
+- Add process-level handlers at top of server.js:
+  process.on("uncaughtException", …log…)
+  process.on("unhandledRejection", …log…)
+- Do NOT exit the process inside these handlers; just log (Railway already restarts).
+
+4) Make request aborts non-fatal and less noisy
+- The “BadRequestError: request aborted” from raw-body is expected when clients/proxies drop.
+- Add an Express error middleware that:
+  - Detects aborted request errors (err.type === "entity.too.large" OR err.message contains "request aborted")
+  - Returns a clean 400/413 JSON without stack spam
+  - Logs one-line warning:
+    [REQ_ABORT] method=… path=… requestId=… msg=…
+
+5) Stabilize readiness/health behavior
+- Keep /health lightweight and always 200 when process is up.
+- Keep /ready but ensure it can’t block for long:
+  - Add a short DB ping timeout (already 1500ms) but ALSO guard so /ready never takes >2s.
+  - If DB ping times out, return 503 quickly with reason=db_ping_timeout.
+
+6) Add explicit server-side timeouts (defensive)
+- Set:
+  - server.keepAliveTimeout = 65_000
+  - server.headersTimeout = 70_000
+  - server.requestTimeout = 30_000
+  (These help under some proxies and reduce weird abort edges.)
+- Do NOT set something that would cut off /api/attest at 5s; Recânon is the one with ~5s, but the node should still behave well.
+
+7) (Optional but recommended) Add a tiny /admin/debug endpoint behind ADMIN_SECRET
+- GET /admin/debug/runtime
+- Return:
+  - nodeVersion, instanceId, uptimeSec
+  - hasSupabaseUrl, hasCerIngestSecret
+  - dbPing ok/latency (with a 500ms timeout)
+This is for rapid production diagnosis.
+
+Acceptance criteria
+- /api/attest responds consistently and quickly (<1s typical) even when ingestion is enabled.
+- Large AI CER bundles no longer cause silent aborts; oversized bodies return a clear 413.
+- Logs let us distinguish:
+  - verification time vs DB insert time vs aborts vs restarts
+- No behavior changes to hashing / verification logic.
+
+Files likely to touch
+- src/server.js
+- (maybe) src/cer-ingest.js for improved log format only
+- (maybe) src/db.js only if needed for ping timeout helper
+
+Deliverables
+- Implement changes
+- Update/extend tests:
+  - body limit behavior (optional if difficult)
+  - abort handler doesn’t crash
+  - timing logs don’t throw
+- Bump version (patch) and confirm /version output
+
+Important constraints
+- Do not redesign endpoints.
+- Do not change protocol semantics.
+- Do not make ingestion blocking.
+- Do not leak secrets in logs.

@@ -20,6 +20,15 @@ import {
 } from "@nexart/codemode-sdk/node";
 import { createRequire } from "module";
 
+process.on("uncaughtException", (err) => {
+  console.error(`[FATAL] uncaughtException: ${err.message}`, err.stack);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error(`[FATAL] unhandledRejection: ${msg}`);
+});
+
 const requireJson = createRequire(import.meta.url);
 const packageJson = requireJson("../package.json");
 
@@ -185,11 +194,14 @@ function executeSnapshot(snapshot) {
   return { canvas, numericSeed, normalizedVars, codeLength: code.length };
 }
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "50mb" }));
 app.use(requestCounterMiddleware);
 app.use(requestLoggingMiddleware);
 
 app.get("/ready", async (req, res) => {
+  const readyStart = Date.now();
+  const READY_TIMEOUT = 2000;
+
   const identity = {
     node: "nexart-canonical",
     version: NODE_VERSION,
@@ -217,22 +229,38 @@ app.get("/ready", async (req, res) => {
     });
   }
 
-  const dbPing = await pingDatabase(1500);
-  if (!dbPing.ok) {
+  try {
+    const dbPing = await Promise.race([
+      pingDatabase(1500),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("ready_timeout")), READY_TIMEOUT))
+    ]);
+
+    if (!dbPing.ok) {
+      return res.status(503).json({
+        status: "not_ready",
+        reason: dbPing.reason === "timeout" ? "db_ping_timeout" : "db_ping_failed",
+        db: "fail",
+        ms: Date.now() - readyStart,
+        ...identity
+      });
+    }
+
+    res.json({
+      status: "ready",
+      db: "ok",
+      db_latency_ms: dbPing.latencyMs,
+      ms: Date.now() - readyStart,
+      ...identity
+    });
+  } catch (err) {
     return res.status(503).json({
       status: "not_ready",
-      reason: "db_ping_failed",
+      reason: "db_ping_timeout",
       db: "fail",
+      ms: Date.now() - readyStart,
       ...identity
     });
   }
-
-  res.json({
-    status: "ready",
-    db: "ok",
-    db_latency_ms: dbPing.latencyMs,
-    ...identity
-  });
 });
 
 app.get("/health", (req, res) => {
@@ -528,9 +556,12 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
 
     if (isAiCer) {
       // ========== AI Execution CER path ==========
+      const t0 = Date.now();
       const cleaned = removeUndefinedDeep(bundle);
 
       const validationErrors = validateAiCerBundle(cleaned);
+      const tValidated = Date.now();
+
       if (validationErrors.length > 0) {
         res.set("X-Quota-Limit", String(quota.limit));
         res.set("X-Quota-Used", String(quota.used));
@@ -572,6 +603,8 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
         });
       }
 
+      const tVerified = Date.now();
+
       if (!result.ok) {
         res.set("X-Quota-Limit", String(quota.limit));
         res.set("X-Quota-Used", String(quota.used));
@@ -610,6 +643,8 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
         error: null
       });
 
+      const tDb = Date.now();
+
       const attestationObj = {
         attestedAt,
         attestationId: requestId,
@@ -624,10 +659,9 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
 
       const coercedId = coerceUsageEventId(usageEventId);
 
+      const tIngestEnqueue = Date.now();
       if (coercedId != null) {
-        const certShort = (cleaned.certificateHash || "unknown").slice(0, 20);
         const storeSensitive = process.env.STORE_SENSITIVE_AI === "true";
-        console.log(`[cer-ingest] attempt usageEventId=${coercedId} cert=${certShort}`);
         ingestCerBundle({
           usageEventId: coercedId,
           endpoint: "/api/attest",
@@ -635,9 +669,10 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
           attestation: attestationObj,
           storeSensitive
         }).catch(() => {});
-      } else {
-        console.warn(`[cer-ingest] skipped (invalid usageEventId) raw=${JSON.stringify(usageEventId)}`);
       }
+
+      const tEnd = Date.now();
+      console.log(`[ATTEST] requestId=${requestId} bundleType=${cleaned.bundleType} ms_total=${tEnd - t0} ms_validate=${tValidated - t0} ms_verify=${tVerified - tValidated} ms_db=${tDb - tVerified} ms_ingest_enqueue=${tEnd - tIngestEnqueue} status=200`);
 
       return res.json({
         ok: true,
@@ -1080,6 +1115,60 @@ app.get("/admin/usage/month", requireAdmin, async (req, res) => {
   }
 });
 
+const serverBootTime = Date.now();
+
+app.get("/admin/debug/runtime", requireAdmin, async (req, res) => {
+  let dbStatus = { ok: false, reason: "skipped" };
+  try {
+    dbStatus = await Promise.race([
+      pingDatabase(500),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("debug_ping_timeout")), 600))
+    ]);
+  } catch {
+    dbStatus = { ok: false, reason: "timeout" };
+  }
+
+  res.json({
+    nodeVersion: process.version,
+    instanceId: INSTANCE_ID,
+    uptimeSec: Math.round((Date.now() - serverBootTime) / 1000),
+    serviceVersion: NODE_VERSION,
+    sdkVersion: SDK_VERSION,
+    protocolVersion: DEFAULT_PROTOCOL_VERSION,
+    hasSupabaseUrl: !!process.env.SUPABASE_URL,
+    hasCerIngestSecret: !!process.env.CER_INGEST_SECRET,
+    dbPing: dbStatus,
+    inFlightRequests,
+    isShuttingDown
+  });
+});
+
+app.use((err, req, res, _next) => {
+  const reqId = req.headers["x-request-id"] || "none";
+
+  if (err.type === "entity.too.large") {
+    console.warn(`[REQ_ABORT] method=${req.method} path=${req.path} requestId=${reqId} msg=entity_too_large`);
+    return res.status(413).json({
+      error: "PAYLOAD_TOO_LARGE",
+      message: "Request body exceeds size limit"
+    });
+  }
+
+  if (err.message && err.message.includes("request aborted")) {
+    console.warn(`[REQ_ABORT] method=${req.method} path=${req.path} requestId=${reqId} msg=request_aborted`);
+    return res.status(400).json({
+      error: "REQUEST_ABORTED",
+      message: "Client closed the connection before the request completed"
+    });
+  }
+
+  console.error(`[ERROR] method=${req.method} path=${req.path} requestId=${reqId} msg=${err.message}`);
+  return res.status(500).json({
+    error: "INTERNAL_ERROR",
+    message: "An unexpected error occurred"
+  });
+});
+
 async function gracefulShutdown(server, signal) {
   console.log(`[shutdown] received ${signal}, draining...`);
   isShuttingDown = true;
@@ -1128,7 +1217,11 @@ async function startServer() {
   
   const server = app.listen(PORT, "0.0.0.0", () => {
     serverReady = true;
-    
+
+    server.keepAliveTimeout = 65_000;
+    server.headersTimeout = 70_000;
+    server.requestTimeout = 30_000;
+
     console.log(`[BOOT] NexArt Canonical Node v${NODE_VERSION}`);
     console.log(`[BOOT] SDK: ${SDK_VERSION} | Protocol: ${DEFAULT_PROTOCOL_VERSION} | Port: ${PORT}`);
     console.log(`[BOOT] Canvas: ${CANVAS_WIDTH}×${CANVAS_HEIGHT}`);
