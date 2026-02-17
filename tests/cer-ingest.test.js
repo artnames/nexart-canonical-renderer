@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import crypto from 'crypto';
 
-const BASE_URL = 'http://localhost:5000';
-
 const AI_CER_FIXTURE = {
   bundleType: "cer.ai.execution.v1",
   certificateHash: "sha256:1dc840c0b72bf39ebb0f9ed63cfdab76b581c3cdaf55f5b8276ded49b364e52d",
@@ -44,7 +42,7 @@ describe('CER Ingestion Module', () => {
     vi.restoreAllMocks();
   });
 
-  it('ingestCerBundle sends correct payload to Supabase edge function', async () => {
+  it('sends both X-CER-INGEST-SECRET and Authorization headers', async () => {
     const calls = [];
     const mockFetch = vi.fn(async (url, opts) => {
       calls.push({ url, opts });
@@ -79,6 +77,7 @@ describe('CER Ingestion Module', () => {
     expect(call.opts.method).toBe('POST');
     expect(call.opts.headers['Content-Type']).toBe('application/json');
     expect(call.opts.headers['X-CER-INGEST-SECRET']).toBe('test-secret');
+    expect(call.opts.headers['Authorization']).toBe('Bearer test-secret');
 
     const body = JSON.parse(call.opts.body);
     expect(body.usageEventId).toBe(42);
@@ -86,12 +85,34 @@ describe('CER Ingestion Module', () => {
     expect(body.attestation.verified).toBe(true);
   });
 
-  it('ingestCerBundle silently skips when env vars are missing', async () => {
-    const mockFetch = vi.fn();
-    globalThis.fetch = mockFetch;
+  it('logs disabled message once when env vars are missing', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     delete process.env.SUPABASE_URL;
     delete process.env.CER_INGEST_SECRET;
+
+    const mockFetch = vi.fn();
+    globalThis.fetch = mockFetch;
+
+    vi.resetModules();
+    const { ingestCerBundle } = await import('../src/cer-ingest.js');
+
+    await ingestCerBundle({ usageEventId: 1, bundle: AI_CER_FIXTURE, attestation: {} });
+    await ingestCerBundle({ usageEventId: 2, bundle: AI_CER_FIXTURE, attestation: {} });
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    const disabledCalls = warnSpy.mock.calls.filter(c => c[0].includes('disabled'));
+    expect(disabledCalls).toHaveLength(1);
+    expect(disabledCalls[0][0]).toBe('[cer-ingest] disabled (missing env)');
+  });
+
+  it('logs success with usageEventId and cert on 2xx', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    process.env.SUPABASE_URL = 'https://test.supabase.co';
+    process.env.CER_INGEST_SECRET = 'test-secret';
+
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200 }));
 
     vi.resetModules();
     const { ingestCerBundle } = await import('../src/cer-ingest.js');
@@ -102,50 +123,62 @@ describe('CER Ingestion Module', () => {
       attestation: { verified: true }
     });
 
-    expect(mockFetch).not.toHaveBeenCalled();
+    const okCalls = logSpy.mock.calls.filter(c => c[0].includes('[cer-ingest] ok'));
+    expect(okCalls).toHaveLength(1);
+    expect(okCalls[0][0]).toContain('usageEventId=42');
+    expect(okCalls[0][0]).toContain('cert=sha256:');
   });
 
-  it('ingestCerBundle does not throw on fetch failure', async () => {
+  it('logs failure with status, usageEventId, and body on non-2xx', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
     process.env.SUPABASE_URL = 'https://test.supabase.co';
     process.env.CER_INGEST_SECRET = 'test-secret';
 
-    const mockFetch = vi.fn(async () => {
-      throw new Error('Network error');
-    });
-    globalThis.fetch = mockFetch;
-
-    vi.resetModules();
-    const { ingestCerBundle } = await import('../src/cer-ingest.js');
-
-    await expect(
-      ingestCerBundle({
-        usageEventId: 42,
-        bundle: AI_CER_FIXTURE,
-        attestation: { verified: true }
-      })
-    ).resolves.toBeUndefined();
-  });
-
-  it('ingestCerBundle does not throw on non-ok response', async () => {
-    process.env.SUPABASE_URL = 'https://test.supabase.co';
-    process.env.CER_INGEST_SECRET = 'test-secret';
-
-    const mockFetch = vi.fn(async () => ({
+    globalThis.fetch = vi.fn(async () => ({
       ok: false,
-      status: 500,
-      text: async () => 'Internal Server Error'
+      status: 403,
+      text: async () => 'Forbidden'
     }));
-    globalThis.fetch = mockFetch;
+
+    vi.resetModules();
+    const { ingestCerBundle } = await import('../src/cer-ingest.js');
+
+    await ingestCerBundle({
+      usageEventId: 99,
+      bundle: AI_CER_FIXTURE,
+      attestation: { verified: true }
+    });
+
+    const failCalls = warnSpy.mock.calls.filter(c => c[0].includes('[cer-ingest] fail'));
+    expect(failCalls).toHaveLength(1);
+    expect(failCalls[0][0]).toContain('status=403');
+    expect(failCalls[0][0]).toContain('usageEventId=99');
+    expect(failCalls[0][0]).toContain('body=Forbidden');
+  });
+
+  it('logs error with usageEventId on network failure without throwing', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    process.env.SUPABASE_URL = 'https://test.supabase.co';
+    process.env.CER_INGEST_SECRET = 'test-secret';
+
+    globalThis.fetch = vi.fn(async () => { throw new Error('Connection refused'); });
 
     vi.resetModules();
     const { ingestCerBundle } = await import('../src/cer-ingest.js');
 
     await expect(
       ingestCerBundle({
-        usageEventId: 42,
+        usageEventId: 77,
         bundle: AI_CER_FIXTURE,
         attestation: { verified: true }
       })
     ).resolves.toBeUndefined();
+
+    const errCalls = warnSpy.mock.calls.filter(c => c[0].includes('[cer-ingest] error'));
+    expect(errCalls).toHaveLength(1);
+    expect(errCalls[0][0]).toContain('usageEventId=77');
+    expect(errCalls[0][0]).toContain('Connection refused');
   });
 });
