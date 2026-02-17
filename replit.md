@@ -321,7 +321,7 @@ Content-Type: application/json
 
 ## Version Info
 
-- Service Version: from `package.json` (currently 0.3.3)
+- Service Version: from `package.json` (currently 0.4.0)
 - SDK Version: 1.8.4
 - Protocol Version: 1.2.0
 - Service Build: git SHA (from `GIT_SHA` or `RAILWAY_GIT_COMMIT_SHA` env, otherwise "unknown")
@@ -358,15 +358,30 @@ Content-Type: application/json
 - `GET /admin/usage/month` - This month's usage (requires ADMIN_SECRET)
 
 ### CER Bundle Persistence
-- After a successful AI CER attestation (`bundleType === "cer.ai.execution.v1"`), the node posts the bundle + attestation to a Supabase edge function for storage
-- Fire-and-forget: ingestion failure does NOT fail the `/api/attest` response
+- After a successful `/api/attest` (AI CER) or `/api/render`, the node persists the certified record to Supabase
+- Fire-and-forget: ingestion failure does NOT affect endpoint responses
 - Requires `SUPABASE_URL` and `CER_INGEST_SECRET` env vars; silently skips if either is missing
-- Endpoint: `POST ${SUPABASE_URL}/functions/v1/store-cer-bundle`
-- Payload: `{ usageEventId, bundle, attestation }`
+- Edge function: `POST ${SUPABASE_URL}/functions/v1/store-cer-bundle`
 - Auth: `Authorization: Bearer ${CER_INGEST_SECRET}` header
-- Sensitive fields (snapshot.input, snapshot.output, snapshot.prompt) are NOT redacted in the payload (the edge function handles storage policy)
 - Module: `src/cer-ingest.js`
-- 10s timeout per request
+- 10s timeout for bundle ingestion, 30s timeout for artifact upload
+
+#### AI CER (`/api/attest`)
+- Payload: `{ usageEventId, endpoint, bundle, attestation, storeSensitive }`
+- `storeSensitive`: derived from `STORE_SENSITIVE_AI` env var (default false)
+- Edge function handles redaction policy
+
+#### Render Records (`/api/render`)
+- Bundle type: `cer.codemode.render.v1`
+- Computes: `codeHash` (sha256 of code), `varsHash` (sha256 of VAR JSON)
+- Uploads artifact (PNG) to Supabase Storage: `certified-artifacts/user/{userId}/usage/{usageEventId}/output.png`
+- Payload: `{ usageEventId, endpoint, bundle, attestation, artifact: { path, contentType } }`
+- Attestation checks: `["runtime_hash", "code_hash"]`
+
+### Environment Variables (CER Persistence)
+- `SUPABASE_URL`: Supabase project URL (required for persistence)
+- `CER_INGEST_SECRET`: Shared secret for Supabase edge function + storage auth
+- `STORE_SENSITIVE_AI`: If `"true"`, tells edge function to store full AI CER bundle (default: false)
 
 ## Deployment
 

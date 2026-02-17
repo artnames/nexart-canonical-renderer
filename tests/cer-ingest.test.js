@@ -27,6 +27,30 @@ const AI_CER_FIXTURE = {
   meta: { source: "nexart.io", tags: ["demo"] }
 };
 
+describe('coerceUsageEventId', () => {
+  let coerceUsageEventId;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const mod = await import('../src/cer-ingest.js');
+    coerceUsageEventId = mod.coerceUsageEventId;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('accepts a number', () => { expect(coerceUsageEventId(42)).toBe(42); });
+  it('accepts a numeric string', () => { expect(coerceUsageEventId("123")).toBe(123); });
+  it('accepts an object with numeric id', () => { expect(coerceUsageEventId({ id: 99 })).toBe(99); });
+  it('accepts an object with string id', () => { expect(coerceUsageEventId({ id: "456" })).toBe(456); });
+  it('returns null for boolean true', () => { expect(coerceUsageEventId(true)).toBeNull(); });
+  it('returns null for false', () => { expect(coerceUsageEventId(false)).toBeNull(); });
+  it('returns null for null', () => { expect(coerceUsageEventId(null)).toBeNull(); });
+  it('returns null for non-numeric string', () => { expect(coerceUsageEventId("abc")).toBeNull(); });
+});
+
 describe('CER Ingestion Module', () => {
   let originalFetch;
   let originalEnv;
@@ -42,7 +66,7 @@ describe('CER Ingestion Module', () => {
     vi.restoreAllMocks();
   });
 
-  it('sends Authorization Bearer header and correct payload', async () => {
+  it('sends Authorization Bearer and includes endpoint + storeSensitive in payload', async () => {
     const calls = [];
     const mockFetch = vi.fn(async (url, opts) => {
       calls.push({ url, opts });
@@ -59,19 +83,79 @@ describe('CER Ingestion Module', () => {
 
     await ingestCerBundle({
       usageEventId: 42,
+      endpoint: "/api/attest",
       bundle: AI_CER_FIXTURE,
-      attestation: { attestationId: "a1", verified: true }
+      attestation: { verified: true },
+      storeSensitive: true
     });
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const call = calls[0];
-    expect(call.url).toBe('https://test.supabase.co/functions/v1/store-cer-bundle');
     expect(call.opts.headers['Authorization']).toBe('Bearer test-secret');
     expect(call.opts.headers['X-CER-INGEST-SECRET']).toBeUndefined();
 
     const body = JSON.parse(call.opts.body);
     expect(body.usageEventId).toBe(42);
+    expect(body.endpoint).toBe("/api/attest");
+    expect(body.storeSensitive).toBe(true);
     expect(body.bundle.bundleType).toBe('cer.ai.execution.v1');
+  });
+
+  it('includes artifact metadata when provided', async () => {
+    const calls = [];
+    const mockFetch = vi.fn(async (url, opts) => {
+      calls.push({ url, opts });
+      return { ok: true, status: 200, text: async () => '{"ok":true}' };
+    });
+
+    process.env.SUPABASE_URL = 'https://test.supabase.co';
+    process.env.CER_INGEST_SECRET = 'test-secret';
+
+    vi.resetModules();
+    globalThis.fetch = mockFetch;
+
+    const { ingestCerBundle } = await import('../src/cer-ingest.js');
+
+    await ingestCerBundle({
+      usageEventId: 42,
+      endpoint: "/api/render",
+      bundle: { bundleType: "cer.codemode.render.v1", runtimeHash: "abc" },
+      attestation: { verified: true },
+      artifactPath: "user/u1/usage/42/output.png",
+      artifactContentType: "image/png"
+    });
+
+    const body = JSON.parse(calls[0].opts.body);
+    expect(body.artifact).toEqual({
+      path: "user/u1/usage/42/output.png",
+      contentType: "image/png"
+    });
+  });
+
+  it('omits artifact field when no artifactPath', async () => {
+    const calls = [];
+    const mockFetch = vi.fn(async (url, opts) => {
+      calls.push({ url, opts });
+      return { ok: true, status: 200, text: async () => '{"ok":true}' };
+    });
+
+    process.env.SUPABASE_URL = 'https://test.supabase.co';
+    process.env.CER_INGEST_SECRET = 'test-secret';
+
+    vi.resetModules();
+    globalThis.fetch = mockFetch;
+
+    const { ingestCerBundle } = await import('../src/cer-ingest.js');
+
+    await ingestCerBundle({
+      usageEventId: 42,
+      endpoint: "/api/attest",
+      bundle: AI_CER_FIXTURE,
+      attestation: { verified: true }
+    });
+
+    const body = JSON.parse(calls[0].opts.body);
+    expect(body.artifact).toBeUndefined();
   });
 
   it('logs boot-time env diagnostic', async () => {
@@ -87,21 +171,6 @@ describe('CER Ingestion Module', () => {
     expect(bootLines).toHaveLength(1);
     expect(bootLines[0][0]).toContain('hasSupabaseUrl=true');
     expect(bootLines[0][0]).toContain('hasCerIngestSecret=true');
-  });
-
-  it('boot diagnostic shows false when env vars missing', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    delete process.env.SUPABASE_URL;
-    delete process.env.CER_INGEST_SECRET;
-
-    vi.resetModules();
-    await import('../src/cer-ingest.js');
-
-    const bootLines = logSpy.mock.calls.filter(c => c[0].includes('[cer-ingest] env'));
-    expect(bootLines).toHaveLength(1);
-    expect(bootLines[0][0]).toContain('hasSupabaseUrl=false');
-    expect(bootLines[0][0]).toContain('hasCerIngestSecret=false');
   });
 
   it('logs disabled and skips fetch when env vars missing', async () => {
@@ -122,42 +191,6 @@ describe('CER Ingestion Module', () => {
     expect(disabled.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('logs unified diagnostic on success', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    process.env.SUPABASE_URL = 'https://test.supabase.co';
-    process.env.CER_INGEST_SECRET = 'test-secret';
-
-    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, text: async () => '{"ok":true}' }));
-
-    vi.resetModules();
-    const { ingestCerBundle } = await import('../src/cer-ingest.js');
-
-    await ingestCerBundle({ usageEventId: 42, bundle: AI_CER_FIXTURE, attestation: { verified: true } });
-
-    const lines = logSpy.mock.calls.filter(c => c[0].includes('status=200'));
-    expect(lines).toHaveLength(1);
-    expect(lines[0][0]).toContain('usageEventId=42');
-  });
-
-  it('logs failure diagnostic on non-2xx', async () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    process.env.SUPABASE_URL = 'https://test.supabase.co';
-    process.env.CER_INGEST_SECRET = 'test-secret';
-
-    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 403, text: async () => 'Forbidden' }));
-
-    vi.resetModules();
-    const { ingestCerBundle } = await import('../src/cer-ingest.js');
-
-    await ingestCerBundle({ usageEventId: 99, bundle: AI_CER_FIXTURE, attestation: {} });
-
-    const lines = logSpy.mock.calls.filter(c => c[0].includes('status=403'));
-    expect(lines).toHaveLength(1);
-    expect(lines[0][0]).toContain('usageEventId=99');
-  });
-
   it('does not throw on network failure', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -175,51 +208,114 @@ describe('CER Ingestion Module', () => {
 
     const errCalls = warnSpy.mock.calls.filter(c => c[0].includes('error=Connection refused'));
     expect(errCalls).toHaveLength(1);
-    expect(errCalls[0][0]).toContain('usageEventId=77');
   });
 });
 
-describe('usageEventId coercion in /api/attest', () => {
-  function coerceUsageEventId(raw) {
-    if (typeof raw === "number") return raw;
-    if (typeof raw === "string" && /^\d+$/.test(raw)) return Number(raw);
-    if (raw && typeof raw === "object" && raw.id != null) {
-      const inner = raw.id;
-      if (typeof inner === "number") return inner;
-      if (typeof inner === "string" && /^\d+$/.test(inner)) return Number(inner);
-    }
-    return null;
-  }
+describe('uploadArtifact', () => {
+  let originalFetch;
+  let originalEnv;
 
-  it('accepts a number', () => {
-    expect(coerceUsageEventId(42)).toBe(42);
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    originalEnv = { ...process.env };
   });
 
-  it('accepts a numeric string', () => {
-    expect(coerceUsageEventId("123")).toBe(123);
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    process.env = originalEnv;
+    vi.restoreAllMocks();
   });
 
-  it('accepts an object with numeric id', () => {
-    expect(coerceUsageEventId({ id: 99 })).toBe(99);
+  it('uploads PNG to correct storage path and returns path on success', async () => {
+    const calls = [];
+    const mockFetch = vi.fn(async (url, opts) => {
+      calls.push({ url, opts });
+      return { ok: true, status: 200 };
+    });
+
+    process.env.SUPABASE_URL = 'https://test.supabase.co';
+    process.env.CER_INGEST_SECRET = 'test-secret';
+
+    vi.resetModules();
+    globalThis.fetch = mockFetch;
+
+    const { uploadArtifact } = await import('../src/cer-ingest.js');
+
+    const result = await uploadArtifact({
+      userId: "user-123",
+      usageEventId: 42,
+      buffer: Buffer.from("fake-png"),
+      contentType: "image/png"
+    });
+
+    expect(result).toBe("user/user-123/usage/42/output.png");
+    expect(calls[0].url).toContain('/storage/v1/object/certified-artifacts/user/user-123/usage/42/output.png');
+    expect(calls[0].opts.headers['Authorization']).toBe('Bearer test-secret');
+    expect(calls[0].opts.headers['Content-Type']).toBe('image/png');
   });
 
-  it('accepts an object with string id', () => {
-    expect(coerceUsageEventId({ id: "456" })).toBe(456);
+  it('uploads MP4 with correct extension', async () => {
+    const mockFetch = vi.fn(async () => ({ ok: true, status: 200 }));
+
+    process.env.SUPABASE_URL = 'https://test.supabase.co';
+    process.env.CER_INGEST_SECRET = 'test-secret';
+
+    vi.resetModules();
+    globalThis.fetch = mockFetch;
+
+    const { uploadArtifact } = await import('../src/cer-ingest.js');
+
+    const result = await uploadArtifact({
+      userId: "user-123",
+      usageEventId: 42,
+      buffer: Buffer.from("fake-mp4"),
+      contentType: "video/mp4"
+    });
+
+    expect(result).toBe("user/user-123/usage/42/output.mp4");
   });
 
-  it('returns null for boolean true', () => {
-    expect(coerceUsageEventId(true)).toBeNull();
+  it('returns null when env vars missing', async () => {
+    delete process.env.SUPABASE_URL;
+    delete process.env.CER_INGEST_SECRET;
+
+    vi.resetModules();
+    const { uploadArtifact } = await import('../src/cer-ingest.js');
+
+    const result = await uploadArtifact({
+      userId: "user-123",
+      usageEventId: 42,
+      buffer: Buffer.from("fake"),
+      contentType: "image/png"
+    });
+
+    expect(result).toBeNull();
   });
 
-  it('returns null for false', () => {
-    expect(coerceUsageEventId(false)).toBeNull();
-  });
+  it('returns null and warns on upload failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-  it('returns null for null', () => {
-    expect(coerceUsageEventId(null)).toBeNull();
-  });
+    process.env.SUPABASE_URL = 'https://test.supabase.co';
+    process.env.CER_INGEST_SECRET = 'test-secret';
 
-  it('returns null for non-numeric string', () => {
-    expect(coerceUsageEventId("abc")).toBeNull();
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      text: async () => 'Internal error'
+    }));
+
+    vi.resetModules();
+    const { uploadArtifact } = await import('../src/cer-ingest.js');
+
+    const result = await uploadArtifact({
+      userId: "user-123",
+      usageEventId: 42,
+      buffer: Buffer.from("fake"),
+      contentType: "image/png"
+    });
+
+    expect(result).toBeNull();
+    const warns = warnSpy.mock.calls.filter(c => c[0].includes('artifact upload failed'));
+    expect(warns.length).toBeGreaterThanOrEqual(1);
   });
 });

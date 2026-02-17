@@ -1,0 +1,115 @@
+Store ALL Certified Records + Artifacts for /api/render and /api/attest (no more UNAVAILABLE)
+
+Goal
+Every successful certified run must create a persisted, auditable record visible in NexArt dashboard “Usage & Certified Records”, regardless of whether the endpoint returns JSON or binary PNG/MP4.
+
+Non-goals
+No redesign of the dashboard UI. No compliance workflows. No team roles.
+
+1) Data model (Supabase)
+
+Create/extend:
+
+Table: cer_bundles (one row per usage_event_id)
+	•	usage_event_id (PK or unique)
+	•	user_id (owner)
+	•	endpoint (e.g. /api/attest, /api/render)
+	•	bundle_type (e.g. cer.ai.execution.v1, cer.codemode.render.v1)
+	•	protocol_version
+	•	sdk_version
+	•	certificate_hash (nullable; AI CER has it, render record uses runtime_hash as primary)
+	•	runtime_hash (nullable; render has it)
+	•	code_hash (nullable; render has it)
+	•	attestation_json (jsonb)
+	•	bundle_json_redacted (jsonb)
+	•	bundle_storage_path_full (text nullable)
+	•	bundle_storage_path_redacted (text nullable)
+	•	artifact_storage_path (text nullable; PNG/MP4)
+	•	artifact_content_type (text nullable)
+	•	created_at
+
+RLS
+	•	Owner read/write only: auth.uid() = user_id
+	•	Insert via edge function using shared secret auth (no JWT from clients)
+	•	Dashboard fetch uses authenticated user session
+
+2) Node behavior changes (Railway node)
+
+After each successful request:
+
+/api/attest (AI CER)
+	•	You already produce { ok, certificateHash, attestation }
+	•	Persist:
+	•	bundle JSON redacted in DB
+	•	bundle JSON (full) in Storage if STORE_SENSITIVE_AI=true else don’t store full
+	•	Call Supabase Edge store-cer-bundle with:
+	•	usageEventId
+	•	endpoint
+	•	bundle (full bundle payload)
+	•	attestation (object)
+	•	storeSensitive boolean (derived from env)
+
+/api/render (PNG/MP4 binary)
+	•	Compute and persist:
+	•	runtimeHash (sha256 of PNG bytes)
+	•	codeHash (sha256 of code string)
+	•	seed, varsHash (sha256 of VAR array JSON), canvas, durationMs
+	•	artifact bytes uploaded to Supabase Storage
+	•	Create a “Render Record” bundle object:
+	•	bundleType: "cer.codemode.render.v1"
+	•	runtimeHash, codeHash, seed, varsHash, protocolVersion, sdkVersion, timestamp, contentType
+	•	attestation object with nodeRuntimeHash, attestedAt, checks: ["runtime_hash","code_hash"], verified: true
+	•	Call store-cer-bundle with that bundle + attestation + artifact storage path.
+
+Important: response behavior must not change. /api/render still returns PNG/MP4 as today.
+
+3) Supabase Edge functions
+
+Implement or extend:
+
+store-cer-bundle
+	•	Auth: Authorization: Bearer CER_INGEST_SECRET
+	•	Inputs:
+	•	usageEventId
+	•	endpoint
+	•	bundle
+	•	attestation
+	•	optional artifact metadata: { path, contentType }
+	•	Derive user_id by joining Railway DB usage_events → api_keys → user_id
+	•	Redact sensitive fields for AI bundles when storing bundle_json_redacted
+	•	Store references to Storage objects
+	•	Upsert into cer_bundles keyed by usage_event_id
+
+fetch-cer-bundle
+	•	Given list of usage_event_ids, return stored bundle rows for the authenticated user
+
+4) Dashboard wiring (Lovable already mostly done)
+	•	On Usage page load, for rows:
+	•	fetch cer_bundles by usage ids
+	•	fill in certificate hash / protocol / bundle type / runtime hash
+	•	In drawer:
+	•	If /api/render: show Render Record fields + “Download Artifact” + “Download Render Record JSON”
+	•	If /api/attest: show AI CER + “Download CER JSON”
+	•	Remove “UNAVAILABLE” state for successful rows: replace with PASS + available metadata
+
+5) Storage (Supabase Storage)
+
+Create bucket: certified-artifacts
+	•	Paths:
+	•	user/{userId}/usage/{usageEventId}/output.png
+	•	user/{userId}/usage/{usageEventId}/bundle.redacted.json
+	•	user/{userId}/usage/{usageEventId}/bundle.full.json (only if enabled)
+
+6) Testing
+	•	Unit test ingestion payloads
+	•	Integration smoke:
+	•	run /api/render once → dashboard shows render record + artifact link
+	•	run /api/attest once → dashboard shows AI CER + bundle download
+	•	Confirm: no “PARTIAL/UNAVAILABLE” for successful rows
+
+Done condition
+	•	A fintech CTO clicks any successful row and sees:
+	•	hashes
+	•	attestation details
+	•	downloadable artifact + record JSON
+	•	consistent auditability across JSON and PNG paths

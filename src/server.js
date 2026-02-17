@@ -8,7 +8,7 @@ import { getVersionInfo } from "./version.js";
 import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool } from "./db.js";
 import { verifyBundle, validateAiCerBundle, computeAttestationHash, sha256, canonicalJson } from "./attest.js";
 import { removeUndefinedDeep } from "./sanitize.js";
-import { ingestCerBundle } from "./cer-ingest.js";
+import { ingestCerBundle, coerceUsageEventId, uploadArtifact } from "./cer-ingest.js";
 import { verifyCer } from "@nexart/ai-execution";
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
@@ -342,7 +342,7 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     const vars = Array.isArray(VAR) ? VAR : new Array(10).fill(0);
 
     const snapshot = { code, seed: seed || "default", vars };
-    const { canvas } = executeSnapshot(snapshot);
+    const { canvas, normalizedVars } = executeSnapshot(snapshot);
 
     const pngBuffer = canvas.toBuffer("image/png");
     runtimeHash = computeHash(pngBuffer);
@@ -383,7 +383,60 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
     }
     
     if (!req.meteringSkipped) {
-      logUsage(req, res, runtimeHash, null, resolvedProtocolVersion, protocolVersionWasDefaulted);
+      const usageResult = logUsage(req, res, runtimeHash, null, resolvedProtocolVersion, protocolVersionWasDefaulted);
+
+      Promise.resolve(usageResult).then(async (rawId) => {
+        const usageEventId = coerceUsageEventId(rawId);
+        if (usageEventId == null) {
+          console.warn(`[cer-ingest] render skipped (invalid usageEventId) raw=${JSON.stringify(rawId)}`);
+          return;
+        }
+
+        const userId = req.apiKey?.userId || "unknown";
+        const codeHash = sha256(code);
+        const varsHash = sha256(JSON.stringify(normalizedVars));
+        const timestamp = new Date().toISOString();
+
+        const artifactPath = await uploadArtifact({
+          userId,
+          usageEventId,
+          buffer: pngBuffer,
+          contentType: "image/png"
+        });
+
+        const renderBundle = {
+          bundleType: "cer.codemode.render.v1",
+          runtimeHash,
+          codeHash,
+          seed: seed || "default",
+          varsHash,
+          protocolVersion: resolvedProtocolVersion,
+          sdkVersion: SDK_VERSION,
+          canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+          contentType: "image/png",
+          timestamp
+        };
+
+        const renderAttestation = {
+          attestedAt: timestamp,
+          nodeRuntimeHash: runtimeHash,
+          protocolVersion: resolvedProtocolVersion,
+          checks: ["runtime_hash", "code_hash"],
+          verified: true
+        };
+
+        console.log(`[cer-ingest] attempt usageEventId=${usageEventId} runtimeHash=${runtimeHash.slice(0, 16)}`);
+        await ingestCerBundle({
+          usageEventId,
+          endpoint: "/api/render",
+          bundle: renderBundle,
+          attestation: renderAttestation,
+          artifactPath,
+          artifactContentType: "image/png"
+        });
+      }).catch((err) => {
+        console.warn(`[cer-ingest] render ingest error: ${err.message}`);
+      });
     }
   } catch (error) {
     // For error cases, use default protocol version since we may not have parsed request
@@ -577,23 +630,18 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
         checks: ["snapshot_hashes", "certificate_hash"]
       };
 
-      let coercedId = null;
-      if (typeof usageEventId === "number") {
-        coercedId = usageEventId;
-      } else if (typeof usageEventId === "string" && /^\d+$/.test(usageEventId)) {
-        coercedId = Number(usageEventId);
-      } else if (usageEventId && typeof usageEventId === "object" && usageEventId.id != null) {
-        const inner = usageEventId.id;
-        coercedId = typeof inner === "number" ? inner : (typeof inner === "string" && /^\d+$/.test(inner) ? Number(inner) : null);
-      }
+      const coercedId = coerceUsageEventId(usageEventId);
 
       if (coercedId != null) {
         const certShort = (cleaned.certificateHash || "unknown").slice(0, 20);
+        const storeSensitive = process.env.STORE_SENSITIVE_AI === "true";
         console.log(`[cer-ingest] attempt usageEventId=${coercedId} cert=${certShort}`);
         ingestCerBundle({
           usageEventId: coercedId,
+          endpoint: "/api/attest",
           bundle: cleaned,
-          attestation: attestationObj
+          attestation: attestationObj,
+          storeSensitive
         }).catch(() => {});
       } else {
         console.warn(`[cer-ingest] skipped (invalid usageEventId) raw=${JSON.stringify(usageEventId)}`);

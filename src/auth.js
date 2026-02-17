@@ -129,11 +129,10 @@ export function requireAdmin(req, res, next) {
 }
 
 export function createUsageLogger(sdkVersion, defaultProtocolVersion, canvasWidth, canvasHeight) {
-  // Signature: logUsage(req, res, runtimeHash, error, resolvedProtocolVersion?, protocolDefaulted?)
   return (req, res, runtimeHash, error, resolvedProtocolVersion, protocolDefaulted) => {
     const durationMs = Date.now() - (req.startTime || Date.now());
     
-    logUsageEvent({
+    return logUsageEvent({
       apiKeyId: req.apiKey?.id || null,
       endpoint: req.path,
       statusCode: res.statusCode,
@@ -141,7 +140,6 @@ export function createUsageLogger(sdkVersion, defaultProtocolVersion, canvasWidt
       width: canvasWidth,
       height: canvasHeight,
       sdkVersion,
-      // Use resolved version if provided, otherwise fall back to default
       protocolVersion: resolvedProtocolVersion ?? defaultProtocolVersion,
       protocolDefaulted: protocolDefaulted ?? false,
       runtimeHash: runtimeHash || null,
