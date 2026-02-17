@@ -12,6 +12,7 @@ export async function ingestCerBundle({ usageEventId, bundle, attestation }) {
     return;
   }
 
+  const url = `${SUPABASE_URL}/functions/v1/store-cer-bundle`;
   const payload = {
     usageEventId,
     bundle,
@@ -19,25 +20,19 @@ export async function ingestCerBundle({ usageEventId, bundle, attestation }) {
   };
 
   try {
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/store-cer-bundle`, {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-CER-INGEST-SECRET": CER_INGEST_SECRET,
         "Authorization": `Bearer ${CER_INGEST_SECRET}`
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10000)
     });
 
-    if (response.ok) {
-      const cert = bundle?.certificateHash || "unknown";
-      console.log(`[cer-ingest] ok usageEventId=${usageEventId} cert=${cert}`);
-    } else {
-      const text = await response.text().catch(() => "");
-      console.warn(`[cer-ingest] fail status=${response.status} usageEventId=${usageEventId} body=${text.slice(0, 300)}`);
-    }
+    const text = await response.text().catch(() => "");
+    console.log(`[cer-ingest] usageEventId=${usageEventId} url=${SUPABASE_URL} status=${response.status} body=${text.slice(0, 200)}`);
   } catch (error) {
-    console.warn(`[cer-ingest] error usageEventId=${usageEventId} ${error.message}`);
+    console.warn(`[cer-ingest] usageEventId=${usageEventId} url=${SUPABASE_URL} error=${error.message}`);
   }
 }

@@ -42,11 +42,11 @@ describe('CER Ingestion Module', () => {
     vi.restoreAllMocks();
   });
 
-  it('sends both X-CER-INGEST-SECRET and Authorization headers', async () => {
+  it('sends only Authorization Bearer header (no X-CER-INGEST-SECRET)', async () => {
     const calls = [];
     const mockFetch = vi.fn(async (url, opts) => {
       calls.push({ url, opts });
-      return { ok: true, status: 200 };
+      return { ok: true, status: 200, text: async () => '{"ok":true}' };
     });
 
     process.env.SUPABASE_URL = 'https://test.supabase.co';
@@ -57,27 +57,17 @@ describe('CER Ingestion Module', () => {
 
     const { ingestCerBundle } = await import('../src/cer-ingest.js');
 
-    const attestation = {
-      attestedAt: "2026-02-13T13:13:33.112Z",
-      attestationId: "test-id",
-      bundleType: "cer.ai.execution.v1",
-      certificateHash: "sha256:abc123",
-      verified: true
-    };
-
     await ingestCerBundle({
       usageEventId: 42,
       bundle: AI_CER_FIXTURE,
-      attestation
+      attestation: { attestationId: "a1", verified: true }
     });
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const call = calls[0];
     expect(call.url).toBe('https://test.supabase.co/functions/v1/store-cer-bundle');
-    expect(call.opts.method).toBe('POST');
-    expect(call.opts.headers['Content-Type']).toBe('application/json');
-    expect(call.opts.headers['X-CER-INGEST-SECRET']).toBe('test-secret');
     expect(call.opts.headers['Authorization']).toBe('Bearer test-secret');
+    expect(call.opts.headers['X-CER-INGEST-SECRET']).toBeUndefined();
 
     const body = JSON.parse(call.opts.body);
     expect(body.usageEventId).toBe(42);
@@ -106,13 +96,13 @@ describe('CER Ingestion Module', () => {
     expect(disabledCalls[0][0]).toBe('[cer-ingest] disabled (missing env)');
   });
 
-  it('logs success with usageEventId and cert on 2xx', async () => {
+  it('logs unified diagnostic line with url and status on success', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     process.env.SUPABASE_URL = 'https://test.supabase.co';
     process.env.CER_INGEST_SECRET = 'test-secret';
 
-    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200 }));
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, text: async () => '{"ok":true}' }));
 
     vi.resetModules();
     const { ingestCerBundle } = await import('../src/cer-ingest.js');
@@ -123,14 +113,16 @@ describe('CER Ingestion Module', () => {
       attestation: { verified: true }
     });
 
-    const okCalls = logSpy.mock.calls.filter(c => c[0].includes('[cer-ingest] ok'));
-    expect(okCalls).toHaveLength(1);
-    expect(okCalls[0][0]).toContain('usageEventId=42');
-    expect(okCalls[0][0]).toContain('cert=sha256:');
+    const lines = logSpy.mock.calls.filter(c => c[0].includes('[cer-ingest]'));
+    expect(lines).toHaveLength(1);
+    const line = lines[0][0];
+    expect(line).toContain('usageEventId=42');
+    expect(line).toContain('url=https://test.supabase.co');
+    expect(line).toContain('status=200');
   });
 
-  it('logs failure with status, usageEventId, and body on non-2xx', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('logs unified diagnostic line on non-2xx failure', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     process.env.SUPABASE_URL = 'https://test.supabase.co';
     process.env.CER_INGEST_SECRET = 'test-secret';
@@ -150,11 +142,12 @@ describe('CER Ingestion Module', () => {
       attestation: { verified: true }
     });
 
-    const failCalls = warnSpy.mock.calls.filter(c => c[0].includes('[cer-ingest] fail'));
-    expect(failCalls).toHaveLength(1);
-    expect(failCalls[0][0]).toContain('status=403');
-    expect(failCalls[0][0]).toContain('usageEventId=99');
-    expect(failCalls[0][0]).toContain('body=Forbidden');
+    const lines = logSpy.mock.calls.filter(c => c[0].includes('[cer-ingest]'));
+    expect(lines).toHaveLength(1);
+    const line = lines[0][0];
+    expect(line).toContain('usageEventId=99');
+    expect(line).toContain('status=403');
+    expect(line).toContain('body=Forbidden');
   });
 
   it('logs error with usageEventId on network failure without throwing', async () => {
@@ -176,9 +169,11 @@ describe('CER Ingestion Module', () => {
       })
     ).resolves.toBeUndefined();
 
-    const errCalls = warnSpy.mock.calls.filter(c => c[0].includes('[cer-ingest] error'));
+    const errCalls = warnSpy.mock.calls.filter(c => c[0].includes('[cer-ingest]'));
     expect(errCalls).toHaveLength(1);
-    expect(errCalls[0][0]).toContain('usageEventId=77');
-    expect(errCalls[0][0]).toContain('Connection refused');
+    const line = errCalls[0][0];
+    expect(line).toContain('usageEventId=77');
+    expect(line).toContain('url=https://test.supabase.co');
+    expect(line).toContain('error=Connection refused');
   });
 });

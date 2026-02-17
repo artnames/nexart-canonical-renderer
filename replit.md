@@ -321,7 +321,7 @@ Content-Type: application/json
 
 ## Version Info
 
-- Service Version: from `package.json` (currently 0.3.1)
+- Service Version: from `package.json` (currently 0.3.2)
 - SDK Version: 1.8.4
 - Protocol Version: 1.2.0
 - Service Build: git SHA (from `GIT_SHA` or `RAILWAY_GIT_COMMIT_SHA` env, otherwise "unknown")
@@ -363,7 +363,7 @@ Content-Type: application/json
 - Requires `SUPABASE_URL` and `CER_INGEST_SECRET` env vars; silently skips if either is missing
 - Endpoint: `POST ${SUPABASE_URL}/functions/v1/store-cer-bundle`
 - Payload: `{ usageEventId, bundle, attestation }`
-- Auth: `X-CER-INGEST-SECRET` header
+- Auth: `Authorization: Bearer ${CER_INGEST_SECRET}` header
 - Sensitive fields (snapshot.input, snapshot.output, snapshot.prompt) are NOT redacted in the payload (the edge function handles storage policy)
 - Module: `src/cer-ingest.js`
 - 10s timeout per request
