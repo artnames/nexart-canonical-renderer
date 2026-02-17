@@ -8,7 +8,7 @@ import { getVersionInfo } from "./version.js";
 import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool } from "./db.js";
 import { verifyBundle, validateAiCerBundle, computeAttestationHash, sha256, canonicalJson } from "./attest.js";
 import { removeUndefinedDeep } from "./sanitize.js";
-import { ingestCerBundle, coerceUsageEventId, uploadArtifact } from "./cer-ingest.js";
+import { ingestCerBundle, coerceUsageEventId } from "./cer-ingest.js";
 import { verifyCer } from "@nexart/ai-execution";
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
@@ -392,17 +392,9 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
           return;
         }
 
-        const userId = req.apiKey?.userId || "unknown";
         const codeHash = sha256(code);
         const varsHash = sha256(JSON.stringify(normalizedVars));
         const timestamp = new Date().toISOString();
-
-        const artifactPath = await uploadArtifact({
-          userId,
-          usageEventId,
-          buffer: pngBuffer,
-          contentType: "image/png"
-        });
 
         const renderBundle = {
           bundleType: "cer.codemode.render.v1",
@@ -425,14 +417,14 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
           verified: true
         };
 
-        console.log(`[cer-ingest] attempt usageEventId=${usageEventId} runtimeHash=${runtimeHash.slice(0, 16)}`);
+        console.log(`[cer-ingest] attempt usageEventId=${usageEventId} bundleType=cer.codemode.render.v1`);
         await ingestCerBundle({
           usageEventId,
           endpoint: "/api/render",
           bundle: renderBundle,
           attestation: renderAttestation,
-          artifactPath,
-          artifactContentType: "image/png"
+          artifactBase64: pngBuffer.toString("base64"),
+          artifactMime: "image/png"
         });
       }).catch((err) => {
         console.warn(`[cer-ingest] render ingest error: ${err.message}`);
