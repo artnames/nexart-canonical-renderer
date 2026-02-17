@@ -577,12 +577,26 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
         checks: ["snapshot_hashes", "certificate_hash"]
       };
 
+      let coercedId = null;
       if (typeof usageEventId === "number") {
+        coercedId = usageEventId;
+      } else if (typeof usageEventId === "string" && /^\d+$/.test(usageEventId)) {
+        coercedId = Number(usageEventId);
+      } else if (usageEventId && typeof usageEventId === "object" && usageEventId.id != null) {
+        const inner = usageEventId.id;
+        coercedId = typeof inner === "number" ? inner : (typeof inner === "string" && /^\d+$/.test(inner) ? Number(inner) : null);
+      }
+
+      if (coercedId != null) {
+        const certShort = (cleaned.certificateHash || "unknown").slice(0, 20);
+        console.log(`[cer-ingest] attempt usageEventId=${coercedId} cert=${certShort}`);
         ingestCerBundle({
-          usageEventId,
+          usageEventId: coercedId,
           bundle: cleaned,
           attestation: attestationObj
         }).catch(() => {});
+      } else {
+        console.warn(`[cer-ingest] skipped (invalid usageEventId) raw=${JSON.stringify(usageEventId)}`);
       }
 
       return res.json({

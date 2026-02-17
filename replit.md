@@ -321,7 +321,7 @@ Content-Type: application/json
 
 ## Version Info
 
-- Service Version: from `package.json` (currently 0.3.2)
+- Service Version: from `package.json` (currently 0.3.3)
 - SDK Version: 1.8.4
 - Protocol Version: 1.2.0
 - Service Build: git SHA (from `GIT_SHA` or `RAILWAY_GIT_COMMIT_SHA` env, otherwise "unknown")

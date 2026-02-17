@@ -1,14 +1,11 @@
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const CER_INGEST_SECRET = process.env.CER_INGEST_SECRET;
 
-let disabledLogged = false;
+console.log(`[cer-ingest] env hasSupabaseUrl=${!!SUPABASE_URL} hasCerIngestSecret=${!!CER_INGEST_SECRET}`);
 
 export async function ingestCerBundle({ usageEventId, bundle, attestation }) {
   if (!SUPABASE_URL || !CER_INGEST_SECRET) {
-    if (!disabledLogged) {
-      console.warn("[cer-ingest] disabled (missing env)");
-      disabledLogged = true;
-    }
+    console.warn("[cer-ingest] disabled (missing env)");
     return;
   }
 
