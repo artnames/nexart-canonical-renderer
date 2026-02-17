@@ -8,6 +8,7 @@ import { getVersionInfo } from "./version.js";
 import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool } from "./db.js";
 import { verifyBundle, validateAiCerBundle, computeAttestationHash, sha256, canonicalJson } from "./attest.js";
 import { removeUndefinedDeep } from "./sanitize.js";
+import { ingestCerBundle } from "./cer-ingest.js";
 import { verifyCer } from "@nexart/ai-execution";
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
@@ -556,7 +557,7 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
       res.set("X-Quota-Used", String(quota.used + 1));
       res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining - 1)));
 
-      logUsageEvent({
+      const usageEventId = await logUsageEvent({
         apiKeyId: req.apiKey?.id || null,
         endpoint: "/api/attest",
         statusCode: 200,
@@ -564,21 +565,31 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
         error: null
       });
 
+      const attestationObj = {
+        attestedAt,
+        attestationId: requestId,
+        bundleType: cleaned.bundleType,
+        certificateHash: cleaned.certificateHash,
+        nodeRuntimeHash,
+        protocolVersion: DEFAULT_PROTOCOL_VERSION,
+        requestId,
+        verified: true,
+        checks: ["snapshot_hashes", "certificate_hash"]
+      };
+
+      if (typeof usageEventId === "number") {
+        ingestCerBundle({
+          usageEventId,
+          bundle: cleaned,
+          attestation: attestationObj
+        }).catch(() => {});
+      }
+
       return res.json({
         ok: true,
         bundleType: cleaned.bundleType,
         certificateHash: cleaned.certificateHash,
-        attestation: {
-          attestedAt,
-          attestationId: requestId,
-          bundleType: cleaned.bundleType,
-          certificateHash: cleaned.certificateHash,
-          nodeRuntimeHash,
-          protocolVersion: DEFAULT_PROTOCOL_VERSION,
-          requestId,
-          verified: true,
-          checks: ["snapshot_hashes", "certificate_hash"]
-        }
+        attestation: attestationObj
       });
     }
 

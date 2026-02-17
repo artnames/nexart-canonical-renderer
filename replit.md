@@ -321,7 +321,7 @@ Content-Type: application/json
 
 ## Version Info
 
-- Service Version: from `package.json` (currently 0.2.2)
+- Service Version: from `package.json` (currently 0.3.0)
 - SDK Version: 1.8.4
 - Protocol Version: 1.2.0
 - Service Build: git SHA (from `GIT_SHA` or `RAILWAY_GIT_COMMIT_SHA` env, otherwise "unknown")
@@ -333,6 +333,8 @@ Content-Type: application/json
 - `ADMIN_SECRET`: Secret for admin endpoints
 - `METERING_REQUIRED`: If `false`, allows renders when DB unavailable
 - `ENFORCE_QUOTA`: If `false`, disables quota enforcement (kill switch). Default: `true` in production, `false` in development
+- `SUPABASE_URL`: Supabase project URL for CER bundle persistence (optional)
+- `CER_INGEST_SECRET`: Shared secret for authenticating with the Supabase edge function (optional)
 
 ### API Key Auth
 - `/api/render` requires `Authorization: Bearer <api_key>`
@@ -354,6 +356,17 @@ Content-Type: application/json
 ### Admin Endpoints
 - `GET /admin/usage/today` - Today's usage (requires ADMIN_SECRET)
 - `GET /admin/usage/month` - This month's usage (requires ADMIN_SECRET)
+
+### CER Bundle Persistence
+- After a successful AI CER attestation (`bundleType === "cer.ai.execution.v1"`), the node posts the bundle + attestation to a Supabase edge function for storage
+- Fire-and-forget: ingestion failure does NOT fail the `/api/attest` response
+- Requires `SUPABASE_URL` and `CER_INGEST_SECRET` env vars; silently skips if either is missing
+- Endpoint: `POST ${SUPABASE_URL}/functions/v1/store-cer-bundle`
+- Payload: `{ usageEventId, bundle, attestation }`
+- Auth: `X-CER-INGEST-SECRET` header
+- Sensitive fields (snapshot.input, snapshot.output, snapshot.prompt) are NOT redacted in the payload (the edge function handles storage policy)
+- Module: `src/cer-ingest.js`
+- 10s timeout per request
 
 ## Deployment
 

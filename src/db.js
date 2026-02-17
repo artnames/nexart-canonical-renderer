@@ -195,11 +195,12 @@ export async function logUsageEvent(event) {
   if (!db) return false;
 
   try {
-    await db.query(
+    const result = await db.query(
       `INSERT INTO usage_events 
        (api_key_id, endpoint, status_code, duration_ms, width, height, 
         sdk_version, protocol_version, protocol_defaulted, runtime_hash, output_hash_prefix, error)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING id`,
       [
         event.apiKeyId || null,
         event.endpoint,
@@ -215,7 +216,7 @@ export async function logUsageEvent(event) {
         event.error || null
       ]
     );
-    return true;
+    return result.rows[0]?.id || true;
   } catch (error) {
     console.error("[DB] Usage logging error:", error.message);
     return false;
