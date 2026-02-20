@@ -6,10 +6,10 @@ import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
 import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool, insertCerProof, getProofByCertificateHash, listProofs } from "./db.js";
-import { verifyBundle, validateAiCerBundle, computeAttestationHash, sha256, canonicalJson } from "./attest.js";
+import { verifyCodeModeBundle, verifyAiExecBundle, validateAiCerBundle, computeAttestationHash, sha256, sha256hex, canonicalize, isValidSha256 } from "./attest.js";
 import { removeUndefinedDeep } from "./sanitize.js";
 import { ingestCerBundle, coerceUsageEventId } from "./cer-ingest.js";
-import { verifyCer } from "@nexart/ai-execution";
+
 import { createAuthMiddleware, requireAdmin, createUsageLogger } from "./auth.js";
 import {
   createP5Runtime,
@@ -546,7 +546,7 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
     const isAiCer = bundle.bundleType === "cer.ai.execution.v1";
 
     // ========== Node runtime hash (shared by both paths) ==========
-    const nodeRuntimeHash = sha256(canonicalJson({
+    const nodeRuntimeHash = sha256(canonicalize({
       node: "nexart-canonical",
       version: NODE_VERSION,
       sdk_version: SDK_VERSION,
@@ -560,53 +560,11 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
       const t0 = Date.now();
       const cleaned = removeUndefinedDeep(bundle);
 
-      const validationErrors = validateAiCerBundle(cleaned);
+      const aiVerification = verifyAiExecBundle(cleaned);
       const tValidated = Date.now();
-
-      if (validationErrors.length > 0) {
-        res.set("X-Quota-Limit", String(quota.limit));
-        res.set("X-Quota-Used", String(quota.used));
-        res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining)));
-
-        logUsageEvent({
-          apiKeyId: req.apiKey?.id || null,
-          endpoint: "/api/attest",
-          statusCode: 400,
-          durationMs: Date.now() - startTime,
-          error: "INVALID_BUNDLE"
-        });
-
-        return res.status(400).json({
-          error: "INVALID_BUNDLE",
-          details: validationErrors
-        });
-      }
-
-      let result;
-      try {
-        result = verifyCer(cleaned);
-      } catch (verifyError) {
-        res.set("X-Quota-Limit", String(quota.limit));
-        res.set("X-Quota-Used", String(quota.used));
-        res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining)));
-
-        logUsageEvent({
-          apiKeyId: req.apiKey?.id || null,
-          endpoint: "/api/attest",
-          statusCode: 400,
-          durationMs: Date.now() - startTime,
-          error: "INVALID_BUNDLE"
-        });
-
-        return res.status(400).json({
-          error: "INVALID_BUNDLE",
-          details: [verifyError.message || "Bundle verification failed"]
-        });
-      }
-
       const tVerified = Date.now();
 
-      if (!result.ok) {
+      if (!aiVerification.valid) {
         res.set("X-Quota-Limit", String(quota.limit));
         res.set("X-Quota-Used", String(quota.used));
         res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining)));
@@ -621,7 +579,7 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
 
         return res.status(400).json({
           error: "INVALID_BUNDLE",
-          details: result.errors
+          details: aiVerification.errors
         });
       }
 
@@ -709,8 +667,8 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
       });
     }
 
-    // ========== Code Mode bundle path (existing behavior) ==========
-    const verification = verifyBundle(bundle);
+    // ========== Code Mode bundle path ==========
+    const verification = verifyCodeModeBundle(bundle);
 
     if (!verification.valid) {
       res.set("X-Quota-Limit", String(quota.limit));

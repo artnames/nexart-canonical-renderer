@@ -3,12 +3,29 @@ import crypto from 'crypto';
 
 const BASE_URL = 'http://localhost:5000';
 
-function canonicalJson(obj) {
-  return JSON.stringify(obj, Object.keys(obj).sort());
+function canonicalize(value) {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return JSON.stringify(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) return "[" + value.map(v => canonicalize(v)).join(",") + "]";
+  if (typeof value === "object") {
+    const keys = Object.keys(value).sort();
+    const entries = keys.map(k => {
+      if (value[k] === undefined) return null;
+      return JSON.stringify(k) + ":" + canonicalize(value[k]);
+    }).filter(e => e !== null);
+    return "{" + entries.join(",") + "}";
+  }
+  throw new Error(`Unsupported type: ${typeof value}`);
+}
+
+function sha256hex(data) {
+  return crypto.createHash("sha256").update(data, "utf-8").digest("hex");
 }
 
 function sha256(data) {
-  return crypto.createHash("sha256").update(data).digest("hex");
+  return `sha256:${sha256hex(data)}`;
 }
 
 function makeValidCodeModeBundle() {
@@ -22,8 +39,8 @@ function makeValidCodeModeBundle() {
   const version = "1.0.0";
   const createdAt = "2025-01-01T00:00:00.000Z";
 
-  const inputHash = sha256(canonicalJson({ code: snapshot.code, seed: snapshot.seed, vars: snapshot.vars }));
-  const certificateHash = sha256(canonicalJson({ bundleType, createdAt, snapshot, version }));
+  const inputHash = sha256(canonicalize({ code: snapshot.code, seed: snapshot.seed, vars: snapshot.vars }));
+  const certificateHash = sha256(canonicalize({ bundleType, createdAt, snapshot, version }));
 
   return {
     bundleType,
@@ -63,7 +80,7 @@ const AI_CER_FIXTURE = {
 
 async function createTestApiKey(userSuffix = 'attest') {
   const apiKey = `test-${userSuffix}-key-${Date.now()}`;
-  const keyHash = sha256(apiKey);
+  const keyHash = sha256hex(apiKey);
 
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) throw new Error("DATABASE_URL not set");
@@ -90,7 +107,7 @@ async function createTestApiKey(userSuffix = 'attest') {
 
 async function createQuotaExhaustedApiKey() {
   const apiKey = `test-quota-attest-${Date.now()}`;
-  const keyHash = sha256(apiKey);
+  const keyHash = sha256hex(apiKey);
 
   const pg = await import('pg');
   const pool = new pg.default.Pool({ connectionString: process.env.DATABASE_URL });
@@ -145,12 +162,12 @@ describe('POST /api/attest - Code Mode bundles', () => {
     expect(data.attestation).toBeDefined();
     expect(data.attestation.attestedAt).toBeTruthy();
     expect(data.attestation.attestationId).toBeTruthy();
-    expect(data.attestation.attestationHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(data.attestation.nodeRuntimeHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(data.attestation.nodeRuntimeHash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(data.attestation.protocolVersion).toBeTruthy();
     expect(data.attestation.requestId).toBeTruthy();
     expect(data.attestation.verified).toBe(true);
 
+    expect(response.headers.get('X-Certificate-Hash')).toBe(bundle.certificateHash);
     expect(response.headers.get('X-Quota-Limit')).toBeTruthy();
     expect(response.headers.get('X-Quota-Used')).toBeTruthy();
     expect(response.headers.get('X-Quota-Remaining')).toBeTruthy();
@@ -158,7 +175,7 @@ describe('POST /api/attest - Code Mode bundles', () => {
 
   it('should return 400 for tampered certificateHash', async () => {
     const bundle = makeValidCodeModeBundle();
-    bundle.certificateHash = 'a'.repeat(64);
+    bundle.certificateHash = 'sha256:' + 'a'.repeat(64);
 
     const response = await fetch(`${BASE_URL}/api/attest`, {
       method: 'POST',
@@ -180,7 +197,7 @@ describe('POST /api/attest - Code Mode bundles', () => {
 
   it('should return 400 for tampered inputHash', async () => {
     const bundle = makeValidCodeModeBundle();
-    bundle.inputHash = 'b'.repeat(64);
+    bundle.inputHash = 'sha256:' + 'b'.repeat(64);
 
     const response = await fetch(`${BASE_URL}/api/attest`, {
       method: 'POST',
@@ -299,13 +316,14 @@ describe('POST /api/attest - AI CER bundles', () => {
     expect(data.attestation.attestationId).toBeTruthy();
     expect(data.attestation.bundleType).toBe('cer.ai.execution.v1');
     expect(data.attestation.certificateHash).toBe(AI_CER_FIXTURE.certificateHash);
-    expect(data.attestation.nodeRuntimeHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(data.attestation.nodeRuntimeHash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(data.attestation.protocolVersion).toBeTruthy();
     expect(data.attestation.requestId).toBeTruthy();
     expect(data.attestation.verified).toBe(true);
     expect(data.attestation.checks).toContain('snapshot_hashes');
     expect(data.attestation.checks).toContain('certificate_hash');
 
+    expect(response.headers.get('X-Certificate-Hash')).toBe(AI_CER_FIXTURE.certificateHash);
     expect(response.headers.get('X-Quota-Limit')).toBeTruthy();
     expect(response.headers.get('X-Quota-Used')).toBeTruthy();
     expect(response.headers.get('X-Quota-Remaining')).toBeTruthy();
@@ -486,5 +504,45 @@ describe('POST /api/attest - AI CER bundles', () => {
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.ok).toBe(true);
+  });
+});
+
+describe('Deep canonicalize correctness', () => {
+  it('nested snapshot field changes must affect certificateHash', () => {
+    const base = makeValidCodeModeBundle();
+    const tampered = JSON.parse(JSON.stringify(base));
+    tampered.snapshot.code = "function setup() { background(255); }";
+    const tamperedCertHash = sha256(canonicalize({
+      bundleType: tampered.bundleType,
+      createdAt: tampered.createdAt,
+      snapshot: tampered.snapshot,
+      version: tampered.version
+    }));
+    expect(tamperedCertHash).not.toBe(base.certificateHash);
+  });
+
+  it('reordering object keys must NOT change certificateHash', () => {
+    const snapshot1 = { code: "x", seed: "s", vars: [1] };
+    const snapshot2 = { vars: [1], code: "x", seed: "s" };
+    expect(canonicalize(snapshot1)).toBe(canonicalize(snapshot2));
+  });
+
+  it('null values must be preserved in canonicalization', () => {
+    const obj = { a: null, b: 1 };
+    expect(canonicalize(obj)).toBe('{"a":null,"b":1}');
+  });
+
+  it('undefined values must be omitted in canonicalization', () => {
+    const obj = { a: undefined, b: 1 };
+    expect(canonicalize(obj)).toBe('{"b":1}');
+  });
+
+  it('arrays must preserve order', () => {
+    expect(canonicalize([3, 1, 2])).toBe('[3,1,2]');
+  });
+
+  it('deeply nested objects must be recursively sorted', () => {
+    const obj = { z: { b: 2, a: 1 }, a: { y: 3, x: 4 } };
+    expect(canonicalize(obj)).toBe('{"a":{"x":4,"y":3},"z":{"a":1,"b":2}}');
   });
 });

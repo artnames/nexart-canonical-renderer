@@ -3,13 +3,13 @@ import crypto from 'crypto';
 
 const BASE_URL = 'http://localhost:5000';
 
-function sha256(data) {
+function sha256hex(data) {
   return crypto.createHash("sha256").update(data).digest("hex");
 }
 
 async function createTestApiKey(userSuffix = 'hardening') {
   const apiKey = `test-${userSuffix}-key-${Date.now()}`;
-  const keyHash = sha256(apiKey);
+  const keyHash = sha256hex(apiKey);
   const pg = await import('pg');
   const pool = new pg.default.Pool({ connectionString: process.env.DATABASE_URL });
   const userId = `test-${userSuffix}-user`;

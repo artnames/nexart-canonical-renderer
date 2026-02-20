@@ -3,12 +3,29 @@ import crypto from 'crypto';
 
 const BASE_URL = 'http://localhost:5000';
 
-function canonicalJson(obj) {
-  return JSON.stringify(obj, Object.keys(obj).sort());
+function canonicalize(value) {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return JSON.stringify(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) return "[" + value.map(v => canonicalize(v)).join(",") + "]";
+  if (typeof value === "object") {
+    const keys = Object.keys(value).sort();
+    const entries = keys.map(k => {
+      if (value[k] === undefined) return null;
+      return JSON.stringify(k) + ":" + canonicalize(value[k]);
+    }).filter(e => e !== null);
+    return "{" + entries.join(",") + "}";
+  }
+  throw new Error(`Unsupported type: ${typeof value}`);
+}
+
+function sha256hex(data) {
+  return crypto.createHash("sha256").update(data, "utf-8").digest("hex");
 }
 
 function sha256(data) {
-  return crypto.createHash("sha256").update(data).digest("hex");
+  return `sha256:${sha256hex(data)}`;
 }
 
 function makeValidCodeModeBundle(suffix = '') {
@@ -22,15 +39,15 @@ function makeValidCodeModeBundle(suffix = '') {
   const version = suffix ? `1.0.0-${suffix}` : "1.0.0";
   const createdAt = "2025-01-01T00:00:00.000Z";
 
-  const inputHash = sha256(canonicalJson({ code: snapshot.code, seed: snapshot.seed, vars: snapshot.vars }));
-  const certificateHash = sha256(canonicalJson({ bundleType, createdAt, snapshot, version }));
+  const inputHash = sha256(canonicalize({ code: snapshot.code, seed: snapshot.seed, vars: snapshot.vars }));
+  const certificateHash = sha256(canonicalize({ bundleType, createdAt, snapshot, version }));
 
   return { bundleType, version, createdAt, snapshot, inputHash, certificateHash };
 }
 
 async function createTestApiKey(userSuffix) {
   const apiKey = `test-${userSuffix}-key-${Date.now()}`;
-  const keyHash = sha256(apiKey);
+  const keyHash = sha256hex(apiKey);
 
   const pg = await import('pg');
   const pool = new pg.default.Pool({ connectionString: process.env.DATABASE_URL });
@@ -138,7 +155,7 @@ describe('Proof Ledger - /api/attest inserts', () => {
 
   it('should create 0 cer_proofs rows for a 400 hash-mismatch', async () => {
     const bundle = makeValidCodeModeBundle('mismatch-test');
-    bundle.certificateHash = 'a'.repeat(64);
+    bundle.certificateHash = 'sha256:' + 'a'.repeat(64);
 
     const response = await fetch(`${BASE_URL}/api/attest`, {
       method: 'POST',
@@ -153,7 +170,7 @@ describe('Proof Ledger - /api/attest inserts', () => {
 
     await new Promise(r => setTimeout(r, 500));
 
-    const proof = await getProofFromDb('a'.repeat(64));
+    const proof = await getProofFromDb('sha256:' + 'a'.repeat(64));
     expect(proof).toBeNull();
   });
 

@@ -30,7 +30,14 @@ The NexArt Canonical Node is built around the `@nexart/codemode-sdk`, which is t
 - **`auth.js`:** API key authentication, admin middleware, usage logging.
 - **`db.js`:** Database migrations, usage events, quota management, proof ledger CRUD.
 - **`sanitize.js`:** Deep undefined removal for CER bundles.
-- **`attest.js`:** Bundle verification, attestation hashing.
+- **`attest.js`:** Bundle verification, attestation hashing, deep canonicalization (RFC 8785 JCS).
+
+### Hashing & Canonicalization (v0.4.2+)
+
+- **Deep canonicalization:** `canonicalize()` in `attest.js` implements RFC 8785 JSON Canonicalization Scheme (JCS) - recursively sorts object keys, preserves arrays/null, omits undefined. Matches `@nexart/ai-execution` package's `toCanonicalJson()`.
+- **Hash format:** All CER hashes use normalized `sha256:<64-hex-chars>` format everywhere (inputHash, outputHash, certificateHash, nodeRuntimeHash, attestationHash).
+- **Split verification:** `verifyCodeModeBundle()` for Code Mode bundles, `verifyAiExecBundle()` for AI execution bundles with appropriate input/output hash semantics.
+- **API key hashing:** Uses raw hex (no prefix) via `hashApiKey()` in `db.js` for database lookups.
 
 ## Version Info
 
