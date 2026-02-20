@@ -50,11 +50,11 @@ describe('Hardening: /health and /ready', () => {
 });
 
 describe('Hardening: /version', () => {
-  it('should return v0.4.2', async () => {
+  it('should return v0.4.3', async () => {
     const res = await fetch(`${BASE_URL}/version`);
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.serviceVersion).toBe('0.4.2');
+    expect(data.serviceVersion).toBe('0.4.3');
   });
 });
 
@@ -94,7 +94,7 @@ describe('Hardening: /admin/debug/runtime', () => {
     const data = await res.json();
     expect(data.nodeVersion).toBeTruthy();
     expect(typeof data.uptimeSec).toBe('number');
-    expect(data.serviceVersion).toBe('0.4.2');
+    expect(data.serviceVersion).toBe('0.4.3');
     expect(typeof data.hasSupabaseUrl).toBe('boolean');
     expect(typeof data.hasCerIngestSecret).toBe('boolean');
     expect(data.dbPing).toBeDefined();

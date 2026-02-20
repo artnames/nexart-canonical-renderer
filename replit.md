@@ -41,7 +41,7 @@ The NexArt Canonical Node is built around the `@nexart/codemode-sdk`, which is t
 
 ## Version Info
 
-- Service Version: 0.4.2
+- Service Version: 0.4.3
 - SDK Version: 1.8.4
 - Protocol Version: 1.2.0
 
