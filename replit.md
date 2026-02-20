@@ -28,7 +28,7 @@ The NexArt Canonical Node is built around the `@nexart/codemode-sdk`, which is t
 - **`server.js` / `render-loop.js`:** Handles request processing, execution orchestration, and video encoding.
 - **`cer-ingest.js`:** Fire-and-forget CER bundle persistence to Supabase.
 - **`auth.js`:** API key authentication, admin middleware, usage logging.
-- **`db.js`:** Database migrations, usage events, quota management.
+- **`db.js`:** Database migrations, usage events, quota management, proof ledger CRUD.
 - **`sanitize.js`:** Deep undefined removal for CER bundles.
 - **`attest.js`:** Bundle verification, attestation hashing.
 
@@ -47,6 +47,8 @@ The NexArt Canonical Node is built around the `@nexart/codemode-sdk`, which is t
 - `POST /api/render` - CLI contract (API key required)
 - `POST /api/attest` - Attest CER bundles (API key required)
 - `POST /verify` - Verify execution against expected hashes
+- `GET /api/proofs/:certificateHash` - Lookup a single proof by certificate hash (API key required)
+- `GET /api/proofs?apiKeyId=..&limit=50&offset=0` - List proof records (API key required)
 - `GET /admin/usage/today` - Today's usage (ADMIN_SECRET required via X-Admin-Secret header)
 - `GET /admin/usage/month` - Monthly usage (ADMIN_SECRET required)
 - `GET /admin/debug/runtime` - Runtime diagnostics (ADMIN_SECRET required)
@@ -55,10 +57,43 @@ The NexArt Canonical Node is built around the `@nexart/codemode-sdk`, which is t
 
 - **Body limit:** 50mb (supports large AI CER bundles)
 - **Process handlers:** uncaughtException and unhandledRejection logged without crash
-- **Error middleware:** Handles entity.too.large (413) and request aborted (400) cleanly
+- **Error middleware:** Handles entity.too.large (413) and request aborted (400) cleanly with requestId tracking
 - **Server timeouts:** keepAliveTimeout=65s, headersTimeout=70s, requestTimeout=30s
 - **Timing diagnostics:** /api/attest logs structured `[ATTEST]` line with ms_total, ms_validate, ms_verify, ms_db, ms_ingest_enqueue
 - **Ready guard:** /ready never takes >2s (Promise.race with timeout)
+
+## Proof Ledger
+
+Every successful attestation (HTTP 200 from `/api/attest`) produces a permanent, queryable record in the `cer_proofs` table. This serves as the durable proof ledger for the NexArt protocol.
+
+### Behavior
+- On successful attestation: exactly 1 row inserted per unique `certificate_hash` (upsert with `ON CONFLICT DO NOTHING`)
+- Negotiation probes (`X-Nexart-Negotiation: 1` header): NO proof row created, NO usage_event created
+- Hash-mismatch 400 responses: NO proof row created
+- Duplicate attestations of the same `certificate_hash`: silently ignored (first created_at preserved)
+- Response includes `X-Certificate-Hash` header and top-level `attestationId`, `nodeRuntimeHash`, `protocolVersion` fields
+
+### Table Schema (`cer_proofs`)
+- `id` BIGSERIAL PK
+- `created_at` TIMESTAMPTZ NOT NULL DEFAULT now()
+- `api_key_id` BIGINT NULL
+- `bundle_type` TEXT NOT NULL
+- `certificate_hash` TEXT NOT NULL UNIQUE
+- `attestation_id` TEXT NOT NULL
+- `node_runtime_hash` TEXT NOT NULL
+- `protocol_version` TEXT NOT NULL
+- `sdk_version`, `app_id`, `execution_id`, `input_hash`, `output_hash` TEXT NULL
+- `status` TEXT NOT NULL CHECK (IN 'ATTESTED','UNATTESTED','LOCAL')
+- `error` TEXT NULL
+- `artifact_path` TEXT NULL
+- `meta` JSONB NULL
+- Indexes: `(api_key_id, created_at DESC)`, `(certificate_hash)`
+
+### Retention
+Default: indefinite. All proof records are kept permanently.
+
+### Migration
+File: `migrations/006_cer_proofs.sql`
 
 ## CER Bundle Persistence
 
@@ -93,7 +128,7 @@ The NexArt Canonical Node is built around the `@nexart/codemode-sdk`, which is t
 
 - **`@nexart/codemode-sdk`:** The core library for Code Mode semantics and execution.
 - **`p5.js`:** A JavaScript library for creative coding, extended by `p5-extensions.js`.
-- **PostgreSQL:** Used for database operations, including API key storage, usage logging, and account-level quota management.
+- **PostgreSQL:** Used for database operations, including API key storage, usage logging, account-level quota management, and proof ledger.
 - **Supabase:** Used for CER bundle persistence via edge function.
 - **`@nexart/ai-execution` NPM package:** Used for canonical verification of AI Execution CER bundles.
 

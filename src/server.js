@@ -5,7 +5,7 @@ import crypto from "crypto";
 import { renderLoop } from "./render-loop.js";
 import { extendP5Runtime } from "./p5-extensions.js";
 import { getVersionInfo } from "./version.js";
-import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool } from "./db.js";
+import { runMigrations, logUsageEvent, getUsageToday, getUsageMonth, getAccountQuota, getQuotaResetDate, pingDatabase, closePool, insertCerProof, getProofByCertificateHash, listProofs } from "./db.js";
 import { verifyBundle, validateAiCerBundle, computeAttestationHash, sha256, canonicalJson } from "./attest.js";
 import { removeUndefinedDeep } from "./sanitize.js";
 import { ingestCerBundle, coerceUsageEventId } from "./cer-ingest.js";
@@ -41,7 +41,7 @@ const app = express();
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Nexart-Negotiation']
 }));
 
 // Handle preflight requests for all routes
@@ -491,6 +491,7 @@ app.post("/api/render", apiKeyAuth, async (req, res) => {
 app.post("/api/attest", apiKeyAuth, async (req, res) => {
   const startTime = req.startTime || Date.now();
   const requestId = crypto.randomUUID();
+  const isNegotiationProbe = req.headers["x-nexart-negotiation"] === "1";
 
   try {
     // ========== Quota enforcement (same as /api/render) ==========
@@ -635,13 +636,16 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
       res.set("X-Quota-Used", String(quota.used + 1));
       res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining - 1)));
 
-      const usageEventId = await logUsageEvent({
-        apiKeyId: req.apiKey?.id || null,
-        endpoint: "/api/attest",
-        statusCode: 200,
-        durationMs: Date.now() - startTime,
-        error: null
-      });
+      let usageEventId = null;
+      if (!isNegotiationProbe) {
+        usageEventId = await logUsageEvent({
+          apiKeyId: req.apiKey?.id || null,
+          endpoint: "/api/attest",
+          statusCode: 200,
+          durationMs: Date.now() - startTime,
+          error: null
+        });
+      }
 
       const tDb = Date.now();
 
@@ -671,13 +675,36 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
         }).catch(() => {});
       }
 
+      if (!isNegotiationProbe) {
+        insertCerProof({
+          apiKeyId: req.apiKey?.id || null,
+          bundleType: cleaned.bundleType,
+          certificateHash: cleaned.certificateHash,
+          attestationId: requestId,
+          nodeRuntimeHash,
+          protocolVersion: DEFAULT_PROTOCOL_VERSION,
+          sdkVersion: cleaned.snapshot?.sdkVersion || null,
+          appId: cleaned.snapshot?.appId || null,
+          executionId: cleaned.snapshot?.executionId || null,
+          inputHash: cleaned.snapshot?.inputHash || null,
+          outputHash: cleaned.snapshot?.outputHash || null,
+          status: "ATTESTED",
+          meta: cleaned.meta || null
+        }).catch((err) => console.error("[PROOF] insert error:", err.message));
+      }
+
       const tEnd = Date.now();
       console.log(`[ATTEST] requestId=${requestId} bundleType=${cleaned.bundleType} ms_total=${tEnd - t0} ms_validate=${tValidated - t0} ms_verify=${tVerified - tValidated} ms_db=${tDb - tVerified} ms_ingest_enqueue=${tEnd - tIngestEnqueue} status=200`);
+
+      res.set("X-Certificate-Hash", cleaned.certificateHash);
 
       return res.json({
         ok: true,
         bundleType: cleaned.bundleType,
         certificateHash: cleaned.certificateHash,
+        attestationId: requestId,
+        nodeRuntimeHash,
+        protocolVersion: DEFAULT_PROTOCOL_VERSION,
         attestation: attestationObj
       });
     }
@@ -716,18 +743,39 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
     res.set("X-Quota-Used", String(quota.used + 1));
     res.set("X-Quota-Remaining", String(Math.max(0, quota.remaining - 1)));
 
-    logUsageEvent({
-      apiKeyId: req.apiKey?.id || null,
-      endpoint: "/api/attest",
-      statusCode: 200,
-      durationMs: Date.now() - startTime,
-      error: null
-    });
+    if (!isNegotiationProbe) {
+      logUsageEvent({
+        apiKeyId: req.apiKey?.id || null,
+        endpoint: "/api/attest",
+        statusCode: 200,
+        durationMs: Date.now() - startTime,
+        error: null
+      });
+
+      insertCerProof({
+        apiKeyId: req.apiKey?.id || null,
+        bundleType: bundle.bundleType || "codemode",
+        certificateHash: verification.certificateHash,
+        attestationId: requestId,
+        nodeRuntimeHash,
+        protocolVersion: DEFAULT_PROTOCOL_VERSION,
+        sdkVersion: SDK_VERSION || null,
+        inputHash: verification.inputHash || null,
+        outputHash: bundle.outputHash || null,
+        status: "ATTESTED",
+        meta: bundle.meta || null
+      }).catch((err) => console.error("[PROOF] insert error:", err.message));
+    }
+
+    res.set("X-Certificate-Hash", verification.certificateHash);
 
     return res.json({
       ok: true,
       bundleType: bundle.bundleType || "codemode",
       certificateHash: verification.certificateHash,
+      attestationId: requestId,
+      nodeRuntimeHash,
+      protocolVersion: DEFAULT_PROTOCOL_VERSION,
       attestation: {
         attestedAt,
         attestationId: requestId,
@@ -754,6 +802,42 @@ app.post("/api/attest", apiKeyAuth, async (req, res) => {
 
     return res.status(500).json({
       error: "ATTESTATION_ERROR",
+      message: error.message
+    });
+  }
+});
+
+// ========== Proof Ledger Endpoints ==========
+app.get("/api/proofs/:certificateHash", apiKeyAuth, async (req, res) => {
+  try {
+    const proof = await getProofByCertificateHash(req.params.certificateHash);
+    if (!proof) {
+      return res.status(404).json({
+        error: "NOT_FOUND",
+        message: "No proof found for this certificate hash"
+      });
+    }
+    return res.json(proof);
+  } catch (error) {
+    console.error("[PROOFS] Lookup error:", error.message);
+    return res.status(500).json({
+      error: "INTERNAL_ERROR",
+      message: error.message
+    });
+  }
+});
+
+app.get("/api/proofs", apiKeyAuth, async (req, res) => {
+  try {
+    const apiKeyId = req.query.apiKeyId ? parseInt(req.query.apiKeyId, 10) : undefined;
+    const limit = Math.min(parseInt(req.query.limit || "50", 10), 200);
+    const offset = parseInt(req.query.offset || "0", 10);
+    const proofs = await listProofs({ apiKeyId, limit, offset });
+    return res.json({ proofs, count: proofs.length, limit, offset });
+  } catch (error) {
+    console.error("[PROOFS] List error:", error.message);
+    return res.status(500).json({
+      error: "INTERNAL_ERROR",
       message: error.message
     });
   }

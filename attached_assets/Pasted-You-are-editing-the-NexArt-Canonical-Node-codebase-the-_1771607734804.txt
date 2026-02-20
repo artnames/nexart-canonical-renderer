@@ -1,0 +1,50 @@
+You are editing the NexArt Canonical Node codebase (the service that handles POST /api/attest) and the Railway Postgres schema used by that node.
+
+Goal: implement a durable “proof ledger” so every SUCCESSFUL attestation produces a permanent, queryable record. Do NOT rely on HTTP request logs. Do NOT store negotiation probes as proofs.
+
+Requirements
+1) Add a new Postgres table `cer_proofs` (migration SQL) with:
+   - id BIGSERIAL PK
+   - created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+   - api_key_id BIGINT NULL (FK if available)
+   - bundle_type TEXT NOT NULL
+   - certificate_hash TEXT NOT NULL UNIQUE
+   - attestation_id TEXT NOT NULL
+   - node_runtime_hash TEXT NOT NULL
+   - protocol_version TEXT NOT NULL
+   - sdk_version TEXT NULL
+   - app_id TEXT NULL
+   - execution_id TEXT NULL
+   - input_hash TEXT NULL
+   - output_hash TEXT NULL
+   - status TEXT NOT NULL CHECK (status IN ('ATTESTED','UNATTESTED','LOCAL'))
+   - error TEXT NULL
+   - artifact_path TEXT NULL
+   - meta JSONB NULL
+   Add indexes on (api_key_id, created_at DESC) and (certificate_hash).
+
+2) Node behavior changes in /api/attest:
+   - On a successful attestation (HTTP 200), insert into `cer_proofs` exactly once per certificate_hash.
+   - On a negotiation probe (client sends header `X-Nexart-Negotiation: 1`) OR on a 400 hash-mismatch response, do NOT insert into `cer_proofs` and do NOT create a usage_event (or mark it as probe-only in a separate table if you must, but default is no insert).
+   - If the same certificate_hash is attested again, do an upsert that keeps the first created_at (or just ignore duplicates) and never creates multiple proof rows.
+
+3) Return fields in the 200 response (and ensure they are logged):
+   { ok: true, bundleType, certificateHash, attestationId, nodeRuntimeHash, protocolVersion }
+   Also include `X-Certificate-Hash` response header.
+
+4) Add a new read endpoint for the dashboard:
+   GET /api/proofs/:certificateHash -> returns the `cer_proofs` row (404 if missing).
+   Optionally: GET /api/proofs?apiKeyId=..&limit=50 for listing.
+
+5) Tests:
+   - Unit/integration test that a normal attest creates exactly 1 `cer_proofs` row.
+   - Test that a negotiation probe creates 0 rows.
+   - Test that a hash-mismatch 400 creates 0 rows.
+   - Test that repeating the same successful attest does not create duplicates.
+
+Deliverables
+- Migration SQL (or a migration file) for `cer_proofs`
+- Node code changes implementing inserts/upserts
+- New GET endpoint(s)
+- Tests passing
+- Brief note in README/replit.md describing the ledger and retention (default: indefinite)

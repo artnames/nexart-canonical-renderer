@@ -248,6 +248,81 @@ export async function getUsageToday() {
   }
 }
 
+export async function insertCerProof(proof) {
+  const db = getPool();
+  if (!db) return null;
+
+  try {
+    const result = await db.query(
+      `INSERT INTO cer_proofs
+       (api_key_id, bundle_type, certificate_hash, attestation_id,
+        node_runtime_hash, protocol_version, sdk_version, app_id,
+        execution_id, input_hash, output_hash, status, error, artifact_path, meta)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       ON CONFLICT (certificate_hash) DO NOTHING
+       RETURNING id`,
+      [
+        proof.apiKeyId || null,
+        proof.bundleType,
+        proof.certificateHash,
+        proof.attestationId,
+        proof.nodeRuntimeHash,
+        proof.protocolVersion,
+        proof.sdkVersion || null,
+        proof.appId || null,
+        proof.executionId || null,
+        proof.inputHash || null,
+        proof.outputHash || null,
+        proof.status || "ATTESTED",
+        proof.error || null,
+        proof.artifactPath || null,
+        proof.meta ? JSON.stringify(proof.meta) : null
+      ]
+    );
+    return result.rows[0]?.id || "duplicate";
+  } catch (error) {
+    console.error("[DB] Proof insert error:", error.message);
+    return null;
+  }
+}
+
+export async function getProofByCertificateHash(certificateHash) {
+  const db = getPool();
+  if (!db) return null;
+
+  try {
+    const result = await db.query(
+      `SELECT * FROM cer_proofs WHERE certificate_hash = $1`,
+      [certificateHash]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error("[DB] Proof lookup error:", error.message);
+    return null;
+  }
+}
+
+export async function listProofs({ apiKeyId, limit = 50, offset = 0 } = {}) {
+  const db = getPool();
+  if (!db) return [];
+
+  try {
+    let query, params;
+    if (apiKeyId) {
+      query = `SELECT * FROM cer_proofs WHERE api_key_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`;
+      params = [apiKeyId, limit, offset];
+    } else {
+      query = `SELECT * FROM cer_proofs ORDER BY created_at DESC LIMIT $1 OFFSET $2`;
+      params = [limit, offset];
+    }
+    const result = await db.query(query, params);
+    return result.rows;
+  } catch (error) {
+    console.error("[DB] Proof list error:", error.message);
+    return [];
+  }
+}
+
 export async function getUsageMonth() {
   const db = getPool();
   if (!db) return [];
